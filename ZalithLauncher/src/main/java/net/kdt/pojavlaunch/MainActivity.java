@@ -18,6 +18,7 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.view.InputDevice;
@@ -84,6 +85,7 @@ import org.lwjgl.glfw.CallbackBridge;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MainActivity extends BaseActivity implements
         ControlButtonMenuListener,
@@ -116,6 +118,7 @@ public class MainActivity extends BaseActivity implements
     private boolean isKeyboardVisible;
     private boolean isGameServiceBound;
     private boolean isJvmExiting;
+    private final AtomicBoolean launchRequested = new AtomicBoolean(false);
 
     private SimpleTextWatcher inputWatcher;
     private final AnimPlayer inputPreviewAnim = new AnimPlayer();
@@ -260,22 +263,21 @@ public class MainActivity extends BaseActivity implements
         binding.mainDrawerOptions.closeDrawers();
 
         binding.mainGameRenderView.setSurfaceReadyListener(() -> {
+            if (!launchRequested.compareAndSet(false, true)) {
+                Logging.w("MainActivity", "Surface ready callback ignored because launch was already requested.");
+                return;
+            }
+
             try {
                 if (AllSettings.getVirtualMouseStart().getValue()) {
                     binding.mainTouchpad.post(() -> binding.mainTouchpad.switchState());
                 }
-
                 LaunchGame.runGame(this, minecraftVersion, versionInfo);
-
-                Logging.i("MainActivity", "LaunchGame.runGame returned, finishing MainActivity");
+                Logging.i("MainActivity", "LaunchGame.runGame returned");
                 GameService.setActive(false);
-
-                runOnUiThread(() -> {
-                    if (!isFinishing()) {
-                        finish();
-                    }
-                });
             } catch (Throwable e) {
+                launchRequested.set(false);
+                LaunchGame.resetLaunchState();
                 Tools.showErrorRemote(e);
             }
         });
@@ -409,9 +411,32 @@ public class MainActivity extends BaseActivity implements
         Logging.i("MainActivity", "JvmExitEvent received, exitCode=" + event.getExitCode());
 
         isJvmExiting = true;
+        launchRequested.set(false);
+        LaunchGame.resetLaunchState();
 
-        if (binding != null && binding.mainDrawerOptions != null) {
-            binding.mainDrawerOptions.closeDrawers();
+        try {
+            CallbackBridge.nativeSetWindowAttrib(LwjglGlfwKeycode.GLFW_FOCUSED, 0);
+            CallbackBridge.nativeSetWindowAttrib(LwjglGlfwKeycode.GLFW_HOVERED, 0);
+            CallbackBridge.nativeSetWindowAttrib(LwjglGlfwKeycode.GLFW_VISIBLE, 0);
+        } catch (Throwable ignored) {
+        }
+
+        if (binding != null) {
+            try {
+                if (binding.mainGameRenderView != null) {
+                    binding.mainGameRenderView.setSurfaceReadyListener(null);
+                    binding.mainGameRenderView.setOnRenderingStartedListener(null);
+                }
+
+                CallbackBridge.removeGrabListener(binding.mainTouchpad);
+                CallbackBridge.removeGrabListener(binding.mainGameRenderView);
+
+                if (binding.mainDrawerOptions != null) {
+                    binding.mainDrawerOptions.closeDrawers();
+                }
+            } catch (Throwable t) {
+                Logging.w("MainActivity", "Failed to clean UI/render state on JVM exit", t);
+            }
         }
 
         if (isGameServiceBound) {
@@ -423,10 +448,23 @@ public class MainActivity extends BaseActivity implements
         }
 
         GameService.setActive(false);
+        stopService(new Intent(this, GameService.class));
 
         if (!isFinishing()) {
             finish();
         }
+
+        TaskExecutors.getUIHandler().postDelayed(() -> {
+            try {
+                String processName = android.app.Application.getProcessName();
+                if (processName != null && processName.endsWith(":game")) {
+                    Logging.i("MainActivity", "JvmExitEvent: killing stale :game process");
+                    android.os.Process.killProcess(android.os.Process.myPid());
+                }
+            } catch (Throwable t) {
+                Logging.w("MainActivity", "Failed to kill :game process after JVM exit", t);
+            }
+        }, 300);
     }
 
     @Override
@@ -449,7 +487,8 @@ public class MainActivity extends BaseActivity implements
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        launchRequested.set(false);
+        LaunchGame.resetLaunchState();
 
         if (gameMenuSettingsController != null) {
             gameMenuSettingsController.closeSpinner();
@@ -464,6 +503,14 @@ public class MainActivity extends BaseActivity implements
         }
 
         if (binding != null) {
+            try {
+                if (binding.mainGameRenderView != null) {
+                    binding.mainGameRenderView.setSurfaceReadyListener(null);
+                    binding.mainGameRenderView.setOnRenderingStartedListener(null);
+                }
+            } catch (Throwable ignored) {
+            }
+
             CallbackBridge.removeGrabListener(binding.mainTouchpad);
             CallbackBridge.removeGrabListener(binding.mainGameRenderView);
         }
@@ -475,6 +522,8 @@ public class MainActivity extends BaseActivity implements
         touchCharInput = null;
         sInstance = null;
         binding = null;
+
+        super.onDestroy();
     }
 
     @Override

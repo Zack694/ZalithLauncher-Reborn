@@ -441,6 +441,8 @@
     <string name="setting_vsync_in_zink_title">Allow V-Sync with Zink</string>
     <string name="setting_vsync_in_zink_desc">Allows the launcher to use internal system APIs to enable V-Sync for Zink</string>
     <string name="setting_vulkan_driver_system_title">Use System Vulkan Driver</string>
+    <string name="setting_use_opengl_26_title">Use OpenGL for Minecraft 26.2+</string>
+    <string name="setting_use_opengl_26_desc">Uses OpenGL as the default graphics API for Minecraft 26.2 and newer. Enable this if your device does not support the required Vulkan features.  Use Vulkan Extension Checker to confirm if your device supports Vulkan.</string>
     <string name="setting_vulkan_driver_system_desc">Forces the launcher to use the system Vulkan driver on Adreno GPUs instead of Turnip, only affects Zink and mods using Vulkan</string>
     <string name="setting_longpress_trigger_title">Long Press Trigger Delay</string>
     <string name="setting_longpress_trigger_desc">Change the delay for triggering long press actions like breaking blocks or dropping items</string>

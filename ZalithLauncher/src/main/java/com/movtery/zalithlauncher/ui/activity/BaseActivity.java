@@ -40,13 +40,10 @@ public abstract class BaseActivity extends AppCompatActivity {
         Tools.updateWindowSize(this);
 
         refreshStoragePermissions();
-
         // Load built-in renderers.
         Renderers.INSTANCE.init(false);
-
         // Load plugins.
         PluginLoader.loadAllPlugins(this, false);
-
         // Refresh the game path list.
         ProfilePathManager.INSTANCE.refreshPath();
     }
@@ -65,15 +62,12 @@ public abstract class BaseActivity extends AppCompatActivity {
 
         refreshStoragePermissions();
 
-        // Force-refresh renderers and plugins in case the user installed
-        // a new renderer plugin while the app was in the background.
-        Renderers.INSTANCE.init(true);
-        PluginLoader.loadAllPlugins(this, true);
-
-        // Refresh the game path list again in case external state changed.
-        ProfilePathManager.INSTANCE.refreshPath();
-
-        AccountsManager.INSTANCE.reload();
+        if (!(this instanceof net.kdt.pojavlaunch.MainActivity)) {
+            Renderers.INSTANCE.init(true);
+            PluginLoader.loadAllPlugins(this, true);
+            ProfilePathManager.INSTANCE.refreshPath();
+            AccountsManager.INSTANCE.reload();
+        }
     }
 
     @Override

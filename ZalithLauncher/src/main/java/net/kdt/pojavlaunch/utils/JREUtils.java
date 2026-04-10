@@ -438,8 +438,8 @@ public final class JREUtils {
             Logger.appendToLog("JVMArg: " + arg);
         }
 
-        setupExitMethod(activity.getApplication());
-        initializeGameExitHook();
+        /*setupExitMethod(activity.getApplication());
+        initializeGameExitHook();*/
         chdir(gameVersion == null ? ProfilePathHome.getGameHome() : gameVersion.getGameDir().getAbsolutePath());
         userArgs.add(0,"java"); //argv[0] is the program name according to C standard.
 

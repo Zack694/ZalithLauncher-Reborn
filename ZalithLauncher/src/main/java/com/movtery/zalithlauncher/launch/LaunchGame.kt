@@ -41,6 +41,8 @@ import net.kdt.pojavlaunch.tasks.MinecraftDownloader
 import net.kdt.pojavlaunch.utils.JREUtils
 import net.kdt.pojavlaunch.value.MinecraftAccount
 import org.greenrobot.eventbus.EventBus
+import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 object LaunchGame {
     @JvmStatic
@@ -156,7 +158,12 @@ object LaunchGame {
             ProgressLayout.clearProgress(ProgressLayout.CHECKING_MODS)
         }
     }
-
+    private val isLaunching = AtomicBoolean(false)
+    @JvmStatic
+    fun resetLaunchState() {
+        isLaunching.set(false)
+        Logger.appendToLog("LaunchGame: launch state reset")
+    }
     @Throws(Throwable::class)
     @JvmStatic
     fun runGame(
@@ -164,62 +171,72 @@ object LaunchGame {
         minecraftVersion: Version,
         version: JMinecraftVersionList.Version
     ) {
-        PluginLoader.refreshAllPlugins(activity)
-        Renderers.reloadRenderers(activity, minecraftVersion.getRenderer(), false)
-        ensureRendererIsValid(activity, minecraftVersion)
-
-        var account = AccountsManager.currentAccount!!
-        if (minecraftVersion.offlineAccountLogin) {
-            account = MinecraftAccount().apply {
-                username = account.username
-                accountType = AccountType.LOCAL.type
-            }
+        if (!isLaunching.compareAndSet(false, true)) {
+            Logger.appendToLog("LaunchGame: launch request ignored because a launch is already in progress")
+            return
         }
 
-        val customArgs = minecraftVersion.getJavaArgs().takeIf { it.isNotBlank() } ?: ""
-        val javaRuntime = resolveRuntime(
-            activity,
-            minecraftVersion,
-            version.javaVersion?.majorVersion ?: 8
-        )
-        val gameDir = minecraftVersion.getGameDir()
+        try {
+            PluginLoader.refreshAllPlugins(activity)
+            Renderers.reloadRenderers(activity, minecraftVersion.getRenderer(), false)
+            ensureRendererIsValid(activity, minecraftVersion)
 
-        Tools.startOldLegacy4JMitigation(activity, gameDir)
-        Tools.startControllableMitigation(activity, gameDir)
-
-        logLaunchInfo(
-            minecraftVersion = minecraftVersion,
-            javaArguments = customArgs.ifBlank { "NONE" },
-            javaRuntime = javaRuntime,
-            account = account
-        )
-
-        minecraftVersion.modCheckResult?.let { modCheckResult ->
-            if (modCheckResult.hasTouchController) {
-                Logger.appendToLog(
-                    "Mod Perception: TouchController mod found, enabling controller proxy automatically."
-                )
-                ControllerProxy.startProxy(activity)
-                AllStaticSettings.useControllerProxy = true
+            var account = AccountsManager.currentAccount!!
+            if (minecraftVersion.offlineAccountLogin) {
+                account = MinecraftAccount().apply {
+                    username = account.username
+                    accountType = AccountType.LOCAL.type
+                }
             }
 
-            if (modCheckResult.hasSodiumOrEmbeddium) {
-                Logger.appendToLog(
-                    "Mod Perception: Sodium or Embeddium found, disable-warning tool may be loaded later."
-                )
+            val customArgs = minecraftVersion.getJavaArgs().takeIf { it.isNotBlank() } ?: ""
+            val javaRuntime = resolveRuntime(
+                activity,
+                minecraftVersion,
+                version.javaVersion?.majorVersion ?: 8
+            )
+            val gameDir = minecraftVersion.getGameDir()
+
+            Tools.startOldLegacy4JMitigation(activity, gameDir)
+            Tools.startControllableMitigation(activity, gameDir)
+
+            logLaunchInfo(
+                minecraftVersion = minecraftVersion,
+                javaArguments = customArgs.ifBlank { "NONE" },
+                javaRuntime = javaRuntime,
+                account = account
+            )
+
+            minecraftVersion.modCheckResult?.let { modCheckResult ->
+                if (modCheckResult.hasTouchController) {
+                    Logger.appendToLog(
+                        "Mod Perception: TouchController mod found, enabling controller proxy automatically."
+                    )
+                    ControllerProxy.startProxy(activity)
+                    AllStaticSettings.useControllerProxy = true
+                }
+
+                if (modCheckResult.hasSodiumOrEmbeddium) {
+                    Logger.appendToLog(
+                        "Mod Perception: Sodium or Embeddium found, disable-warning tool may be loaded later."
+                    )
+                }
+                if (modCheckResult.isLegacy4j) {
+                    Logger.appendToLog(
+                        "Mod Perception: Legacy4J mod found, disable-warning tool maybe loaded later."
+                    )
+                    Settings.Manager.put(AllSettings.gamepadSdlPassthru.key, true).save()
+                    MinecraftGLSurface.sdlEnabled = true
+                }
             }
-            if (modCheckResult.isLegacy4j) {
-                Logger.appendToLog(
-                    "Mod Perception: Legacy4J mod found, disable-warning tool maybe loaded later."
-                )
-                Settings.Manager.put(AllSettings.gamepadSdlPassthru.key, true).save()
-                MinecraftGLSurface.sdlEnabled = true
-            }
+
+            JREUtils.redirectAndPrintJRELog()
+            launchJvm(activity, account, minecraftVersion, javaRuntime, customArgs)
+            GameService.setActive(false)
+        } catch (t: Throwable) {
+            isLaunching.set(false)
+            throw t
         }
-
-        JREUtils.redirectAndPrintJRELog()
-        launchJvm(activity, account, minecraftVersion, javaRuntime, customArgs)
-        GameService.setActive(false)
     }
 
     private fun ensureRendererIsValid(activity: AppCompatActivity, minecraftVersion: Version) {
@@ -302,9 +319,7 @@ object LaunchGame {
         val versionInfo = Tools.getVersionInfo(minecraftVersion)
         val gameDirPath = minecraftVersion.getGameDir()
 
-
-        GraphicsBackendHelper.applyPreferredBackendIfNeeded(
-            context = activity,
+        applyPreferredBackendIfNeeded(
             minecraftVersion = minecraftVersion,
             gameDir = gameDirPath
         )
@@ -362,5 +377,116 @@ object LaunchGame {
                 return
             }
         }
+    }
+
+    //OpenGL Check
+    private fun applyPreferredBackendIfNeeded(
+        minecraftVersion: Version,
+        gameDir: File
+    ) {
+        val versionName = minecraftVersion.getVersionName()
+        if (!is26_2OrNewer(versionName)) return
+
+        val useOpenGL = AllSettings.useOpenGLForMinecraft26.getValue()
+        val useSystemVulkan = AllSettings.zinkPreferSystemDriver.getValue()
+
+        when {
+            useOpenGL -> {
+                Logger.appendToLog("GraphicsBackend: user enabled OpenGL for $versionName")
+                patchOptionsGraphicsBackend(gameDir, "opengl")
+            }
+
+            useSystemVulkan -> {
+                Logger.appendToLog("GraphicsBackend: user enabled System Vulkan Driver for $versionName")
+                patchOptionsGraphicsBackend(gameDir, "vulkan")
+            }
+
+            else -> {
+                Logger.appendToLog("GraphicsBackend: no graphics API selected for $versionName, defaulting to OpenGL")
+                patchOptionsGraphicsBackend(gameDir, "opengl")
+            }
+        }
+    }
+
+    private fun patchOptionsToOpenGL(gameDir: File) {
+        val optionsFile = File(gameDir, "options.txt")
+        Logger.appendToLog("GraphicsBackend: target options file = ${optionsFile.absolutePath}")
+
+        val original = if (optionsFile.exists()) {
+            runCatching { optionsFile.readText() }.getOrDefault("")
+        } else {
+            optionsFile.parentFile?.mkdirs()
+            ""
+        }
+
+        val updated = when {
+            original.contains("""preferredGraphicsBackend:"vulkan"""") -> {
+                original.replace(
+                    """preferredGraphicsBackend:"vulkan"""",
+                    """preferredGraphicsBackend:"opengl""""
+                )
+            }
+
+            Regex("""(?m)^preferredGraphicsBackend:.*$""").containsMatchIn(original) -> {
+                original.replace(
+                    Regex("""(?m)^preferredGraphicsBackend:.*$"""),
+                    """preferredGraphicsBackend:"opengl""""
+                )
+            }
+
+            original.isBlank() -> {
+                """preferredGraphicsBackend:"opengl"""" + "\n"
+            }
+
+            original.endsWith("\n") -> {
+                original + """preferredGraphicsBackend:"opengl"""" + "\n"
+            }
+
+            else -> {
+                original + "\n" + """preferredGraphicsBackend:"opengl"""" + "\n"
+            }
+        }
+
+        runCatching {
+            optionsFile.writeText(updated)
+        }.onSuccess {
+            Logger.appendToLog("GraphicsBackend: options.txt patched to OpenGL successfully")
+        }.onFailure { e ->
+            Logger.appendToLog("GraphicsBackend: failed to patch options.txt: ${e.message}")
+        }
+    }
+    private fun is26_2OrNewer(versionName: String): Boolean {
+        return Regex("""^26\.(2|[3-9]|\d{2,}).*""").matches(versionName)
+    }
+    private fun patchOptionsGraphicsBackend(gameDir: File, backend: String) {
+        val optionsFile = File(gameDir, "options.txt")
+        val targetLine = """preferredGraphicsBackend:"$backend""""
+
+        val original = if (optionsFile.exists()) {
+            runCatching { optionsFile.readText() }.getOrDefault("")
+        } else {
+            optionsFile.parentFile?.mkdirs()
+            ""
+        }
+
+        val updated = when {
+            Regex("""(?m)^preferredGraphicsBackend:.*$""").containsMatchIn(original) -> {
+                original.replace(
+                    Regex("""(?m)^preferredGraphicsBackend:.*$"""),
+                    targetLine
+                )
+            }
+            original.isBlank() -> targetLine + "\n"
+            original.endsWith("\n") -> original + targetLine + "\n"
+            else -> original + "\n" + targetLine + "\n"
+        }
+
+        runCatching { optionsFile.writeText(updated) }
+            .onSuccess {
+                Logger.appendToLog("GraphicsBackend: options.txt patched to $backend successfully")
+            }
+            .onFailure { e ->
+                Logger.appendToLog("GraphicsBackend: failed to patch options.txt to $backend: ${e.message}")
+            }
     }
 }

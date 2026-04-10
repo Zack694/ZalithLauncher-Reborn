@@ -70,13 +70,6 @@ object GraphicsBackendHelper {
             return false
         }
 
-        val sharedPrefs = prefs(context)
-        val savedFailure = sharedPrefs.getBoolean(forceKey(versionName), false)
-        if (savedFailure) {
-            Logger.appendToLog("GraphicsBackend: cached Vulkan failure found for $versionName, forcing OpenGL")
-            return true
-        }
-
         val probeResult = runCatching { nativeProbeMinecraft26Vulkan() }
             .onFailure {
                 Logger.appendToLog("GraphicsBackend: Vulkan probe crashed/failed: ${it.message}")
@@ -85,14 +78,14 @@ object GraphicsBackendHelper {
 
         val probeMessage = runCatching { nativeGetMinecraft26VulkanProbeMessage() }.getOrNull()
 
-        when (probeResult) {
+        return when (probeResult) {
             VULKAN_OK -> {
                 Logger.appendToLog(
                     "GraphicsBackend: Vulkan probe passed for $versionName" +
                             (probeMessage?.let { " ($it)" } ?: "")
                 )
                 clearVulkanFailed(context, versionName, gameDir)
-                return false
+                false
             }
 
             VULKAN_MISSING_PUSH_DESCRIPTOR -> {
@@ -100,46 +93,20 @@ object GraphicsBackendHelper {
                     "GraphicsBackend: Vulkan probe failed for $versionName - missing VK_KHR_push_descriptor" +
                             (probeMessage?.let { " ($it)" } ?: "")
                 )
-            }
-
-            VULKAN_MISSING_FILLMODE_NON_SOLID -> {
-                Logger.appendToLog(
-                    "GraphicsBackend: Vulkan probe failed for $versionName - missing fillModeNonSolid" +
-                            (probeMessage?.let { " ($it)" } ?: "")
-                )
-            }
-
-            VULKAN_NO_DEVICE -> {
-                Logger.appendToLog(
-                    "GraphicsBackend: Vulkan probe failed for $versionName - no usable Vulkan device" +
-                            (probeMessage?.let { " ($it)" } ?: "")
-                )
-            }
-
-            VULKAN_INSTANCE_FAILED -> {
-                Logger.appendToLog(
-                    "GraphicsBackend: Vulkan probe failed for $versionName - could not create Vulkan instance" +
-                            (probeMessage?.let { " ($it)" } ?: "")
-                )
-            }
-
-            VULKAN_DEVICE_ENUM_FAILED -> {
-                Logger.appendToLog(
-                    "GraphicsBackend: Vulkan probe failed for $versionName - physical device enumeration failed" +
-                            (probeMessage?.let { " ($it)" } ?: "")
-                )
+                markVulkanFailed(context, versionName, gameDir)
+                true
             }
 
             else -> {
                 Logger.appendToLog(
-                    "GraphicsBackend: Vulkan probe failed for $versionName - unknown error code $probeResult" +
+                    "GraphicsBackend: Vulkan probe did not qualify for OpenGL fallback for $versionName " +
+                            "(code=$probeResult)" +
                             (probeMessage?.let { " ($it)" } ?: "")
                 )
+                clearVulkanFailed(context, versionName, gameDir)
+                false
             }
         }
-
-        markVulkanFailed(context, versionName, gameDir)
-        return true
     }
 
     fun applyPreferredBackendIfNeeded(

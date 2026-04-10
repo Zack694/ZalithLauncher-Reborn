@@ -14,6 +14,8 @@ class AllSettings {
     companion object {
         // Video
         @JvmStatic
+        val useOpenGLForMinecraft26 = BooleanSettingUnit("useOpenGLForMinecraft26", false)
+        @JvmStatic
         val renderer = StringSettingUnit("renderer", "opengles2")
 
         @JvmStatic

@@ -117,7 +117,9 @@ class VideoSettingsFragment : AbstractSettingsFragment(R.layout.settings_fragmen
             renderers.rendererIdentifier.toTypedArray()
         )
 
-        binding.rendererDownload.setOnClickListener { ZHTools.openLink(context, UrlManager.URL_FCL_RENDERER_PLUGIN) }
+        binding.rendererDownload.setOnClickListener {
+            ZHTools.openLink(context, UrlManager.URL_FCL_RENDERER_PLUGIN)
+        }
 
         BaseSettingsWrapper(
             context,
@@ -143,7 +145,9 @@ class VideoSettingsFragment : AbstractSettingsFragment(R.layout.settings_fragmen
             driverNames
         )
 
-        binding.driverDownload.setOnClickListener { ZHTools.openLink(context, UrlManager.URL_FCL_DRIVER_PLUGIN) }
+        binding.driverDownload.setOnClickListener {
+            ZHTools.openLink(context, UrlManager.URL_FCL_DRIVER_PLUGIN)
+        }
 
         val ignoreNotch = SwitchSettingsWrapper(
             context,
@@ -208,27 +212,74 @@ class VideoSettingsFragment : AbstractSettingsFragment(R.layout.settings_fragmen
             binding.vsyncInZink
         )
 
+        var syncingGraphicsApiToggles = false
+
+        val useOpenGL26 = SwitchSettingsWrapper(
+            context,
+            AllSettings.useOpenGLForMinecraft26,
+            binding.useOpenGL26Layout,
+            binding.useOpenGL26
+        )
+
         val zinkPreferSystemDriver = SwitchSettingsWrapper(
             context,
             AllSettings.zinkPreferSystemDriver,
             binding.zinkPreferSystemDriverLayout,
             binding.zinkPreferSystemDriver
         )
+
+        useOpenGL26.setOnCheckedChangeListener { _, isChecked, listener ->
+            listener.onSave()
+
+            if (syncingGraphicsApiToggles) return@setOnCheckedChangeListener
+
+            if (isChecked && binding.zinkPreferSystemDriver.isChecked) {
+                syncingGraphicsApiToggles = true
+                binding.zinkPreferSystemDriver.isChecked = false
+                syncingGraphicsApiToggles = false
+            }
+        }
+
         if (!Tools.checkVulkanSupport(context.packageManager)) {
+            if (binding.zinkPreferSystemDriver.isChecked) {
+                syncingGraphicsApiToggles = true
+                binding.zinkPreferSystemDriver.isChecked = false
+                syncingGraphicsApiToggles = false
+            }
             zinkPreferSystemDriver.setGone()
         } else {
             zinkPreferSystemDriver.setOnCheckedChangeListener { buttonView, isChecked, listener ->
-                if (isChecked and ZHTools.isAdrenoGPU()) {
+                val saveAndSync = {
+                    listener.onSave()
+
+                    if (!syncingGraphicsApiToggles && isChecked && binding.useOpenGL26.isChecked) {
+                        syncingGraphicsApiToggles = true
+                        binding.useOpenGL26.isChecked = false
+                        syncingGraphicsApiToggles = false
+                    }
+
+                    if (isChecked && binding.useOpenGL26.isChecked) {
+                        syncingGraphicsApiToggles = true
+                        binding.useOpenGL26.isChecked = false
+                        syncingGraphicsApiToggles = false
+                    }
+                }
+
+                if (isChecked && ZHTools.isAdrenoGPU()) {
                     TipDialog.Builder(requireActivity())
                         .setTitle(R.string.generic_warning)
                         .setMessage(R.string.setting_zink_driver_adreno)
                         .setWarning()
                         .setCancelable(false)
-                        .setConfirmClickListener { listener.onSave() }
-                        .setCancelClickListener { buttonView.isChecked = false }
+                        .setConfirmClickListener { saveAndSync() }
+                        .setCancelClickListener {
+                            syncingGraphicsApiToggles = true
+                            buttonView.isChecked = false
+                            syncingGraphicsApiToggles = false
+                        }
                         .showDialog()
                 } else {
-                    listener.onSave()
+                    saveAndSync()
                 }
             }
         }
@@ -248,7 +299,8 @@ class VideoSettingsFragment : AbstractSettingsFragment(R.layout.settings_fragmen
 
     private fun computeVisibility() {
         binding.apply {
-            binding.forceVsyncLayout.visibility = if (AllSettings.alternateSurface.getValue()) View.VISIBLE else View.GONE
+            binding.forceVsyncLayout.visibility =
+                if (AllSettings.alternateSurface.getValue()) View.VISIBLE else View.GONE
         }
     }
 
@@ -262,11 +314,18 @@ class VideoSettingsFragment : AbstractSettingsFragment(R.layout.settings_fragmen
             val metrics = Tools.currentDisplayMetrics
             val width = metrics.widthPixels
             val height = metrics.heightPixels
-            val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE || width > height
+            val isLandscape =
+                resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE || width > height
 
             val progressFloat = progress.toFloat() / 100F
-            val previewWidth = Tools.getDisplayFriendlyRes((if (isLandscape) width else height), progressFloat)
-            val previewHeight = Tools.getDisplayFriendlyRes((if (isLandscape) height else width), progressFloat)
+            val previewWidth = Tools.getDisplayFriendlyRes(
+                (if (isLandscape) width else height),
+                progressFloat
+            )
+            val previewHeight = Tools.getDisplayFriendlyRes(
+                (if (isLandscape) height else width),
+                progressFloat
+            )
 
             return "$previewWidth x $previewHeight"
         }

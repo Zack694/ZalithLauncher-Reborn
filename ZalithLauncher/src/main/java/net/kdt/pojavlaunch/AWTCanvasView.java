@@ -21,102 +21,175 @@ public class AWTCanvasView extends TextureView implements TextureView.SurfaceTex
     public static final int AWT_CANVAS_HEIGHT = (int) (Tools.currentDisplayMetrics.heightPixels * 0.8);
     private static final int MAX_SIZE = 100;
     private static final double NANOS = 1000000000.0;
-    private boolean mIsDestroyed = false;
+
+    private volatile boolean mIsDestroyed = true;
+    private Thread mRenderThread;
+    private Surface mSurface;
+    private Bitmap mRgbArrayBitmap;
     private final TextPaint mFpsPaint;
 
-    // Temporary count fps https://stackoverflow.com/a/13729241
-    private final LinkedList<Long> mTimes = new LinkedList<Long>(){{add(System.nanoTime());}};
-    
+    private final LinkedList<Long> mTimes = new LinkedList<Long>() {{
+        add(System.nanoTime());
+    }};
+
     public AWTCanvasView(Context ctx) {
         this(ctx, null);
     }
-    
+
     public AWTCanvasView(Context ctx, AttributeSet attrs) {
         super(ctx, attrs);
-        
+
         mFpsPaint = new TextPaint();
         mFpsPaint.setColor(Color.WHITE);
         mFpsPaint.setTextSize(24);
 
         setSurfaceTextureListener(this);
-
         post(this::refreshSize);
     }
 
     @Override
-    public void onSurfaceTextureAvailable(SurfaceTexture texture, int w, int h) {
-        getSurfaceTexture().setDefaultBufferSize(AWT_CANVAS_WIDTH, AWT_CANVAS_HEIGHT);
+    public synchronized void onSurfaceTextureAvailable(SurfaceTexture texture, int w, int h) {
+        texture.setDefaultBufferSize(AWT_CANVAS_WIDTH, AWT_CANVAS_HEIGHT);
+        shutdownRendererLocked();
+
         mIsDestroyed = false;
-        new Thread(this, "AndroidAWTRenderer").start();
+        mSurface = new Surface(texture);
+        mRenderThread = new Thread(this, "AndroidAWTRenderer");
+        mRenderThread.start();
     }
 
     @Override
-    public boolean onSurfaceTextureDestroyed(SurfaceTexture texture) {
+    public synchronized boolean onSurfaceTextureDestroyed(SurfaceTexture texture) {
         mIsDestroyed = true;
+        shutdownRendererLocked();
         return true;
     }
 
     @Override
     public void onSurfaceTextureSizeChanged(SurfaceTexture texture, int w, int h) {
-        getSurfaceTexture().setDefaultBufferSize(AWT_CANVAS_WIDTH, AWT_CANVAS_HEIGHT);
+        texture.setDefaultBufferSize(AWT_CANVAS_WIDTH, AWT_CANVAS_HEIGHT);
     }
 
     @Override
     public void onSurfaceTextureUpdated(SurfaceTexture texture) {
-        getSurfaceTexture().setDefaultBufferSize(AWT_CANVAS_WIDTH, AWT_CANVAS_HEIGHT);
+    }
+
+    public synchronized void releaseNow() {
+        mIsDestroyed = true;
+        shutdownRendererLocked();
+    }
+
+    private void shutdownRendererLocked() {
+        Thread thread = mRenderThread;
+        mRenderThread = null;
+
+        if (thread != null && thread != Thread.currentThread()) {
+            thread.interrupt();
+            try {
+                thread.join(300);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        if (mSurface != null) {
+            try {
+                mSurface.release();
+            } catch (Throwable ignored) {
+            }
+            mSurface = null;
+        }
+
+        if (mRgbArrayBitmap != null && !mRgbArrayBitmap.isRecycled()) {
+            mRgbArrayBitmap.recycle();
+            mRgbArrayBitmap = null;
+        }
     }
 
     @Override
     public void run() {
-        Canvas canvas;
-        Surface surface = new Surface(getSurfaceTexture());
-        Bitmap rgbArrayBitmap = Bitmap.createBitmap(AWT_CANVAS_WIDTH, AWT_CANVAS_HEIGHT, Bitmap.Config.ARGB_8888);
-        Paint paint = new Paint();
+        final Paint paint = new Paint();
+
         try {
-            while (!mIsDestroyed && surface.isValid()) {
-                canvas = surface.lockCanvas(null);
-                canvas.drawRGB(0, 0, 0);
-                int[] rgbArray = JREUtils.renderAWTScreenFrame(/* canvas, mWidth, mHeight */);
-                boolean mDrawing = rgbArray != null;
-                if (rgbArray != null) {
-                    canvas.save();
-                    rgbArrayBitmap.setPixels(rgbArray, 0, AWT_CANVAS_WIDTH, 0, 0, AWT_CANVAS_WIDTH, AWT_CANVAS_HEIGHT);
-                    canvas.drawBitmap(rgbArrayBitmap, 0, 0, paint);
-                    canvas.restore();
+            mRgbArrayBitmap = Bitmap.createBitmap(
+                    AWT_CANVAS_WIDTH,
+                    AWT_CANVAS_HEIGHT,
+                    Bitmap.Config.ARGB_8888
+            );
+
+            while (!mIsDestroyed) {
+                Surface surface = mSurface;
+                if (surface == null || !surface.isValid()) break;
+
+                Canvas canvas = null;
+                try {
+                    canvas = surface.lockCanvas(null);
+                    canvas.drawRGB(0, 0, 0);
+
+                    int[] rgbArray = JREUtils.renderAWTScreenFrame();
+                    boolean drawing = rgbArray != null;
+
+                    if (rgbArray != null) {
+                        mRgbArrayBitmap.setPixels(
+                                rgbArray, 0, AWT_CANVAS_WIDTH,
+                                0, 0, AWT_CANVAS_WIDTH, AWT_CANVAS_HEIGHT
+                        );
+                        canvas.drawBitmap(mRgbArrayBitmap, 0, 0, paint);
+                    }
+
+                    canvas.drawText(
+                            "FPS: " + (Math.round(fps() * 10) / 10) + ", drawing=" + drawing,
+                            20,
+                            20,
+                            mFpsPaint
+                    );
+                } finally {
+                    if (canvas != null && surface.isValid()) {
+                        surface.unlockCanvasAndPost(canvas);
+                    }
                 }
-                canvas.drawText("FPS: " + (Math.round(fps() * 10) / 10) + ", drawing=" + mDrawing, 20, 20, mFpsPaint);
-                surface.unlockCanvasAndPost(canvas);
             }
         } catch (Throwable throwable) {
-            Tools.showError(getContext(), throwable);
+            if (!mIsDestroyed) {
+                Tools.showError(getContext(), throwable);
+            }
+        } finally {
+            synchronized (this) {
+                if (mRgbArrayBitmap != null && !mRgbArrayBitmap.isRecycled()) {
+                    mRgbArrayBitmap.recycle();
+                    mRgbArrayBitmap = null;
+                }
+
+                if (mSurface != null) {
+                    try {
+                        mSurface.release();
+                    } catch (Throwable ignored) {
+                    }
+                    mSurface = null;
+                }
+            }
         }
-        rgbArrayBitmap.recycle();
-        surface.release();
     }
 
-    /** Calculates and returns frames per second */
     private double fps() {
         long lastTime = System.nanoTime();
         double difference = (lastTime - mTimes.getFirst()) / NANOS;
         mTimes.addLast(lastTime);
-        int size = mTimes.size();
-        if (size > MAX_SIZE) {
+        if (mTimes.size() > MAX_SIZE) {
             mTimes.removeFirst();
         }
         return difference > 0 ? mTimes.size() / difference : 0.0;
     }
 
-    /** Make the view fit the proper aspect ratio of the surface */
-    private void refreshSize(){
+    private void refreshSize() {
         ViewGroup.LayoutParams layoutParams = getLayoutParams();
+        if (layoutParams == null) return;
 
-        if(getHeight() < getWidth()){
+        if (getHeight() < getWidth()) {
             layoutParams.width = AWT_CANVAS_WIDTH * getHeight() / AWT_CANVAS_HEIGHT;
-        }else{
+        } else {
             layoutParams.height = AWT_CANVAS_HEIGHT * getWidth() / AWT_CANVAS_WIDTH;
         }
-
         setLayoutParams(layoutParams);
     }
-
 }

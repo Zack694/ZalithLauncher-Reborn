@@ -288,6 +288,20 @@ object LaunchGame {
     ) {
         val mcInfo = minecraftVersion.getVersionInfo()?.getInfoString()
             ?: minecraftVersion.getVersionName()
+
+        Logger.appendToLog("--------- Start launching the game")
+        Logger.appendToLog("Info: Launcher version: ${ZHTools.getVersionName()} (${ZHTools.getVersionCode()})")
+        Logger.appendToLog("Info: Architecture: ${Architecture.archAsString(Tools.DEVICE_ARCHITECTURE)}")
+        Logger.appendToLog("Info: Device model: ${StringUtils.insertSpace(Build.MANUFACTURER, Build.MODEL)}")
+        Logger.appendToLog("Info: API version: ${Build.VERSION.SDK_INT}")
+        Logger.appendToLog("Info: Renderer: ${Renderers.getCurrentRenderer().getRendererName()}")
+        Logger.appendToLog("Info: Selected Minecraft version: ${minecraftVersion.getVersionName()}")
+        Logger.appendToLog("Info: Minecraft info: $mcInfo")
+        Logger.appendToLog("Info: Game path: ${minecraftVersion.getGameDir().absolutePath} (Isolation: ${minecraftVersion.isIsolation()})")
+        Logger.appendToLog("Info: Custom Java arguments: $javaArguments")
+        Logger.appendToLog("Info: Java runtime: $javaRuntime")
+        Logger.appendToLog("Info: Account: ${account.username} (${account.accountType})")
+        Logger.appendToLog("---------\r\n")
     }
 
     @Throws(Throwable::class)

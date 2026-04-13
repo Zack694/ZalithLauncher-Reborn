@@ -10,6 +10,7 @@ import com.movtery.zalithlauncher.feature.download.item.SearchResult
 import com.movtery.zalithlauncher.feature.download.item.VersionItem
 import com.movtery.zalithlauncher.feature.download.platform.AbstractPlatformHelper
 import com.movtery.zalithlauncher.feature.download.platform.PlatformNotSupportedException
+import com.movtery.zalithlauncher.feature.download.platform.curseforge.CurseForgeAutoInstallHelper
 import net.kdt.pojavlaunch.modloaders.modpacks.api.ApiHandler
 import java.io.File
 
@@ -87,8 +88,11 @@ class ModrinthHelper : AbstractPlatformHelper(ApiHandler("https://api.modrinth.c
 
     @Throws(Throwable::class)
     override fun installMod(infoItem: InfoItem, version: VersionItem, targetPath: File, progressKey: String) {
-        InstallHelper.downloadFile(version, targetPath, progressKey)
+        com.movtery.zalithlauncher.task.Task.runTask {
+            ModrinthAutoInstallHelper.installModWithDependencies(api, infoItem, version, targetPath, progressKey)
+        }.execute()
     }
+
 
     @Throws(Throwable::class)
     override fun installModPack(version: VersionItem, customName: String): ModLoaderWrapper? {

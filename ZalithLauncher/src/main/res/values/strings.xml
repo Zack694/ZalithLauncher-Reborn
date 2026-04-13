@@ -636,6 +636,7 @@
     <string name="update_success">The latest installation package has been downloaded. Do you want to install it? Package location:</string>
     <string name="update_downloading">Downloading installation package… (%s / %s)</string>
     <string name="update_downloading_tip">Fetching, update source: %s</string>
+    <string name="profile_mods_check_updates">Check Updates</string>
     <!-- Other Login -->
     <string name="other_login_server">Auth Server</string>
     <string name="other_login_email">Email or Username</string>

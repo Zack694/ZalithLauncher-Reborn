@@ -68,16 +68,19 @@ import org.json.JSONObject
 import java.io.File
 import java.util.regex.Pattern
 
-
+// Handles managing accounts DNA Mobile
 class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClickListener {
     companion object {
         const val TAG = "AccountFragment"
     }
 
     private lateinit var binding: FragmentAccountBinding
-    private lateinit var mAccountViewWrapper: AccountViewWrapper
-    private val mAccountsData: MutableList<MinecraftAccount> = AccountsManager.allAccounts.toMutableList()
-    private val mAccountAdapter = AccountAdapter(mAccountsData)
+    private lateinit var accountViewWrapper: AccountViewWrapper
+    private lateinit var progressDialog: AlertDialog
+
+    private val accountsData: MutableList<MinecraftAccount> =
+        AccountsManager.allAccounts.toMutableList()
+    private val accountAdapter = AccountAdapter(accountsData)
 
     private val selectAccountListener = object : SelectAccountListener {
         override fun onSelect(account: MinecraftAccount) {
@@ -95,18 +98,17 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
         }
     }
 
-    private val mServerActionPopupWindow: PopupWindow = PopupWindow().apply {
+    private val serverActionPopupWindow: PopupWindow = PopupWindow().apply {
         isFocusable = true
         isOutsideTouchable = true
     }
 
-    private val mLocalNamePattern = Pattern.compile("[^a-zA-Z0-9_]")
-    private var mOtherServerConfig: Servers? = null
-    private val mOtherServerConfigFile = File(PathManager.DIR_GAME_HOME, "servers.json")
-    private val mOtherServerList: MutableList<Server> = ArrayList()
-    private val mOtherServerViewList: MutableList<View> = ArrayList()
+    private val localNamePattern = Pattern.compile("[^a-zA-Z0-9_]")
 
-    private lateinit var mProgressDialog: AlertDialog
+    private var otherServerConfig: Servers? = null
+    private val otherServerConfigFile = File(PathManager.DIR_GAME_HOME, "servers.json")
+    private val otherServerList: MutableList<Server> = ArrayList()
+    private val otherServerViewList: MutableList<View> = ArrayList()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -114,15 +116,15 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
         savedInstanceState: Bundle?
     ): View {
         binding = FragmentAccountBinding.inflate(layoutInflater)
-        mAccountViewWrapper = AccountViewWrapper(binding = binding.viewAccount)
-        mProgressDialog = ZHTools.createTaskRunningDialog(binding.root.context)
+        accountViewWrapper = AccountViewWrapper(binding = binding.viewAccount)
+        progressDialog = ZHTools.createTaskRunningDialog(binding.root.context)
         return binding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val context = requireActivity()
 
-        mAccountAdapter.setAccountUpdateListener(object : AccountUpdateListener {
+        accountAdapter.setAccountUpdateListener(object : AccountUpdateListener {
             override fun onViewClick(account: MinecraftAccount) {
                 selectAccountListener.onSelect(account)
             }
@@ -130,7 +132,11 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
             override fun onRefresh(account: MinecraftAccount) {
                 if (!isTaskRunning()) {
                     if (!NetworkUtils.isNetworkAvailable(context)) {
-                        Toast.makeText(context, R.string.account_login_no_network, Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            R.string.account_login_no_network,
+                            Toast.LENGTH_SHORT
+                        ).show()
                         return
                     }
                     AccountsManager.performLogin(context, account)
@@ -146,14 +152,15 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
                     .setConfirm(R.string.generic_delete)
                     .setWarning()
                     .setConfirmClickListener {
-                        val accountFile =
-                            File(PathManager.DIR_ACCOUNT_NEW, account.uniqueUUID)
-                        val userSkinFile =
-                            File(PathManager.DIR_USER_SKIN, account.uniqueUUID + ".png")
+                        val accountFile = File(PathManager.DIR_ACCOUNT_NEW, account.uniqueUUID)
+                        val userSkinFile = File(PathManager.DIR_USER_SKIN, "${account.uniqueUUID}.png")
+
                         if (accountFile.exists()) FileUtils.deleteQuietly(accountFile)
                         if (userSkinFile.exists()) FileUtils.deleteQuietly(userSkinFile)
+
                         reloadAccounts()
-                    }.showDialog()
+                    }
+                    .showDialog()
             }
         })
 
@@ -161,16 +168,13 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
             accountsRecycler.layoutManager = LinearLayoutManager(context)
             accountsRecycler.setLayoutAnimation(
                 LayoutAnimationController(
-                    AnimationUtils.loadAnimation(
-                        context,
-                        R.anim.fade_downwards
-                    )
+                    AnimationUtils.loadAnimation(context, R.anim.fade_downwards)
                 )
             )
-            accountsRecycler.adapter = mAccountAdapter
+            accountsRecycler.adapter = accountAdapter
 
             accountTypeTab.observeIndexChange { _, toIndex, _, fromUser ->
-                fun nonMicrosoftLogin(message: Int, login: () -> Unit) {
+                fun handleNonMicrosoftLogin(message: Int, login: () -> Unit) {
                     checkUsageAllowed(object : CheckResultListener {
                         override fun onUsageAllowed() {
                             login()
@@ -186,9 +190,7 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
                                         LocalAccountUtils.saveReminders(checked)
                                         login()
                                     },
-                                    getString(message) + getString(
-                                        R.string.account_purchase_minecraft_account_tip
-                                    ),
+                                    getString(message) + getString(R.string.account_purchase_minecraft_account_tip),
                                     R.string.account_no_microsoft_account_continue
                                 )
                             }
@@ -196,26 +198,31 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
                     })
                 }
 
-                if (fromUser) { //需要判断是否为用户手动点击的，否则会一直进入微软登录界面
+                // We only want to respond to direct user taps.
+                // Otherwise, it may keep opening the Microsoft login screen repeatedly.
+                if (fromUser) {
                     when (toIndex) {
-                        //微软账户
+                        // Microsoft account
                         0 -> ZHTools.swapFragmentWithAnim(
                             this@AccountFragment,
                             MicrosoftLoginFragment::class.java,
                             MicrosoftLoginFragment.TAG,
                             null
                         )
-                        //离线账户
+
+                        // Offline account
                         1 -> {
-                            nonMicrosoftLogin(
-                                R.string.account_no_microsoft_account_local
-                            ) { localLogin() }
+                            handleNonMicrosoftLogin(R.string.account_no_microsoft_account_local) {
+                                localLogin()
+                            }
                         }
-                        //外置账户
+
+                        // External / third-party account
                         else -> {
-                            nonMicrosoftLogin(
-                                R.string.account_no_microsoft_account_other
-                            ) { otherLogin(toIndex - 2) /* Server索引需要从0开始 */ }
+                            handleNonMicrosoftLogin(R.string.account_no_microsoft_account_other) {
+                                // Server index starts from 0.
+                                otherLogin(toIndex - 2)
+                            }
                         }
                     }
                 }
@@ -231,10 +238,9 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
 
     @SuppressLint("NotifyDataSetChanged")
     private fun reloadRecyclerView() {
-        this.mAccountsData.clear()
-        mAccountsData.addAll(AccountsManager.allAccounts)
-
-        this.mAccountAdapter.notifyDataSetChanged()
+        accountsData.clear()
+        accountsData.addAll(AccountsManager.allAccounts)
+        accountAdapter.notifyDataSetChanged()
         binding.accountsRecycler.scheduleLayoutAnimation()
     }
 
@@ -243,12 +249,12 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
             AccountsManager.reload()
         }.ended(TaskExecutors.getAndroidUI()) {
             reloadRecyclerView()
-            mAccountViewWrapper.refreshAccountInfo()
+            accountViewWrapper.refreshAccountInfo()
         }.execute()
     }
 
-    private fun SpannableString.spanText(start: Int, end: Int, what: Any) {
-        this.setSpan(what, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    private fun SpannableString.applySpan(start: Int, end: Int, what: Any) {
+        setSpan(what, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 
     private fun localLogin() {
@@ -262,8 +268,9 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
             .setEmptyErrorText(R.string.account_local_account_empty)
             .setAsRequired()
             .setConfirmListener { editText, _ ->
-                val string = editText.text.toString()
-                if (string.length <= 2 || string.length > 16 || mLocalNamePattern.matcher(string).find()) {
+                val name = editText.text.toString()
+
+                if (name.length <= 2 || name.length > 16 || localNamePattern.matcher(name).find()) {
                     TipDialog.Builder(requireContext())
                         .setTitle(R.string.generic_warning)
                         .setMessage(R.string.account_local_account_invalid)
@@ -277,38 +284,53 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
                             val endIndex = text.indexOf(endTag)
 
                             if (startIndex != -1 && endIndex != -1 && endIndex > startIndex) {
-                                val styledText = text.substring(startIndex + startTag.length, endIndex)
+                                val styledText =
+                                    text.substring(startIndex + startTag.length, endIndex)
                                 val plainText = text.replace(startTag, "").replace(endTag, "")
                                 val adjustedEndIndex = startIndex + styledText.length
 
                                 val spannableString = SpannableString(plainText)
-                                spannableString.spanText(startIndex, adjustedEndIndex, ForegroundColorSpan(Color.RED))
-                                spannableString.spanText(startIndex, adjustedEndIndex, StyleSpan(Typeface.BOLD))
+                                spannableString.applySpan(
+                                    startIndex,
+                                    adjustedEndIndex,
+                                    ForegroundColorSpan(Color.RED)
+                                )
+                                spannableString.applySpan(
+                                    startIndex,
+                                    adjustedEndIndex,
+                                    StyleSpan(Typeface.BOLD)
+                                )
 
                                 messageText.text = spannableString
                             }
                         }
                         .setCenterMessage(false)
-                        .setConfirmClickListener { startLogin(string) }
+                        .setConfirmClickListener { startLogin(name) }
                         .setCancelable(false)
                         .setConfirmButtonCountdown(3000L)
                         .showDialog()
-                } else startLogin(string)
+                } else {
+                    startLogin(name)
+                }
 
                 true
-            }.showDialog()
+            }
+            .showDialog()
     }
 
     private fun otherLogin(index: Int) {
-        val server = mOtherServerList[index]
-        OtherLoginDialog(requireActivity(), server,
+        val server = otherServerList[index]
+
+        OtherLoginDialog(
+            requireActivity(),
+            server,
             object : OtherLoginHelper.OnLoginListener {
                 override fun onLoading() {
-                    mProgressDialog.show()
+                    progressDialog.show()
                 }
 
                 override fun unLoading() {
-                    mProgressDialog.dismiss()
+                    progressDialog.dismiss()
                 }
 
                 override fun onSuccess(account: MinecraftAccount) {
@@ -316,7 +338,7 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
                 }
 
                 override fun onFailed(error: String) {
-                    mProgressDialog.dismiss()
+                    progressDialog.dismiss()
 
                     TipDialog.Builder(requireActivity())
                         .setTitle(R.string.generic_warning)
@@ -324,133 +346,171 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
                         .setWarning()
                         .setCancel(android.R.string.copy)
                         .setCancelClickListener {
-                            StringUtils.copyText(
-                                "error",
-                                error,
-                                requireActivity()
-                            )
+                            StringUtils.copyText("error", error, requireActivity())
                         }
                         .showDialog()
                 }
-            }).show()
+            }
+        ).show()
     }
 
     private fun refreshOtherServer() {
         Task.runTask {
-            mOtherServerList.clear()
-            if (mOtherServerConfigFile.exists()) {
+            otherServerList.clear()
+
+            if (otherServerConfigFile.exists()) {
                 runCatching {
                     val serverConfig = Tools.GLOBAL_GSON.fromJson(
-                        Tools.read(mOtherServerConfigFile.absolutePath),
+                        Tools.read(otherServerConfigFile.absolutePath),
                         Servers::class.java
                     )
-                    mOtherServerConfig = serverConfig
+                    otherServerConfig = serverConfig
                     serverConfig.server.forEach { server ->
-                        mOtherServerList.add(server)
+                        otherServerList.add(server)
                     }
                 }
             }
         }.ended(TaskExecutors.getAndroidUI()) {
-            //将外置服务器添加到账号类别选择栏上
-            mOtherServerViewList.forEach { view ->
+            // Add external servers to the account type tab.
+            otherServerViewList.forEach { view ->
                 binding.accountTypeTab.removeView(view)
             }
-            mOtherServerViewList.clear()
+            otherServerViewList.clear()
 
             val activity = requireActivity()
             val layoutInflater = activity.layoutInflater
 
             fun createView(server: Server): AnimRelativeLayout {
-                val p8 = Tools.dpToPx(8f).toInt()
-                val view = ItemOtherServerBinding.inflate(layoutInflater)
-                view.text.text = server.serverName
-                view.root.setOnLongClickListener { v ->
-                    refreshActionPopupWindow(v, ViewSingleActionPopupBinding.inflate(LayoutInflater.from(activity)).apply {
-                        icon.setImageDrawable(
-                            ContextCompat.getDrawable(requireActivity(), R.drawable.ic_menu_delete_forever)
-                        )
-                        text.setText(R.string.generic_delete)
-                        text.setOnClickListener {
-                            deleteOtherServer(server)
-                            mServerActionPopupWindow.dismiss()
+                val padding = Tools.dpToPx(8f).toInt()
+                val itemBinding = ItemOtherServerBinding.inflate(layoutInflater)
+
+                itemBinding.text.text = server.serverName
+                itemBinding.root.setOnLongClickListener { anchorView ->
+                    refreshActionPopupWindow(
+                        anchorView,
+                        ViewSingleActionPopupBinding.inflate(LayoutInflater.from(activity)).apply {
+                            icon.setImageDrawable(
+                                ContextCompat.getDrawable(
+                                    requireActivity(),
+                                    R.drawable.ic_menu_delete_forever
+                                )
+                            )
+                            text.setText(R.string.generic_delete)
+                            text.setOnClickListener {
+                                deleteOtherServer(server)
+                                serverActionPopupWindow.dismiss()
+                            }
                         }
-                    })
+                    )
                     true
                 }
-                view.root.layoutParams = DslTabLayout.LayoutParams(
+
+                itemBinding.root.layoutParams = DslTabLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 )
-                return view.root.apply {
-                    setPadding(p8, 0, p8, 0)
+
+                return itemBinding.root.apply {
+                    setPadding(padding, 0, padding, 0)
                 }
             }
 
-            mOtherServerList.forEach { server ->
-                val view = createView(server)
-                mOtherServerViewList.add(view)
-                binding.accountTypeTab.addView(view)
+            otherServerList.forEach { server ->
+                val serverView = createView(server)
+                otherServerViewList.add(serverView)
+                binding.accountTypeTab.addView(serverView)
             }
         }.execute()
     }
 
-    private fun showServerTypeSelectDialog(stringId: Int, type: Int) {
+    private fun showServerTypeSelectDialog(titleResId: Int, type: Int) {
         EditTextDialog.Builder(requireActivity())
-            .setTitle(stringId)
+            .setTitle(titleResId)
             .setAsRequired()
             .setConfirmListener { editText, _ ->
                 addOtherServer(editText, type)
                 true
-            }.showDialog()
+            }
+            .showDialog()
     }
 
-    private fun checkServerConfig() {
-        mOtherServerConfig ?: run {
-            val servers = Servers()
-            servers.server = ArrayList()
-            mOtherServerConfig = servers
+    private fun ensureServerConfig() {
+        if (otherServerConfig == null) {
+            otherServerConfig = Servers().apply {
+                server = ArrayList()
+            }
+        }
+    }
+
+    private fun normalizeSpecialServerUrl(url: String): String {
+        return when (url.removeSuffix("/").lowercase()) {
+            "https://ely.by",
+            "http://ely.by",
+            "https://www.ely.by",
+            "http://www.ely.by",
+            "https://account.ely.by",
+            "http://account.ely.by" -> "https://authserver.ely.by"
+
+            else -> url.removeSuffix("/")
         }
     }
 
     private fun addOtherServer(editText: EditText, type: Int) {
         Task.runTask {
-            val editString = editText.text.toString()
-            val serverUrl =
-                if (type == 0) AccountUtils.tryGetFullServerUrl(editString) else editString
-            OtherLoginApi.getServeInfo(
-                requireActivity(),
-                if (type == 0) serverUrl else "https://auth.mc-user.com:233/$serverUrl"
-            )?.let { data ->
+            val input = editText.text.toString().trim()
+
+            val rawServerUrl = if (type == 0) {
+                AccountUtils.tryGetFullServerUrl(input)
+            } else {
+                input
+            }
+
+            val normalizedServerUrl = if (type == 0) {
+                normalizeSpecialServerUrl(rawServerUrl)
+            } else {
+                rawServerUrl
+            }
+
+            val serverInfoUrl = if (type == 0) {
+                normalizedServerUrl
+            } else {
+                "https://auth.mc-user.com:233/$normalizedServerUrl"
+            }
+
+            OtherLoginApi.getServeInfo(requireActivity(), serverInfoUrl)?.let { data ->
                 val server = Server()
+
                 JSONObject(data).optJSONObject("meta")?.let { meta ->
                     server.serverName = meta.optString("serverName")
-                    server.baseUrl = serverUrl
+
                     if (type == 0) {
-                        server.register =
-                            meta.optJSONObject("links")?.optString("register") ?: ""
+                        server.baseUrl = normalizedServerUrl
+                        server.register = meta.optJSONObject("links")?.optString("register") ?: ""
                     } else {
-                        server.baseUrl = "https://auth.mc-user.com:233/$serverUrl"
-                        server.register = "https://login.mc-user.com:233/$serverUrl"
+                        server.baseUrl = "https://auth.mc-user.com:233/$normalizedServerUrl"
+                        server.register = "https://login.mc-user.com:233/$normalizedServerUrl"
                     }
-                    checkServerConfig()
-                    mOtherServerConfig?.server?.apply addServer@{
+
+                    ensureServerConfig()
+                    otherServerConfig?.server?.apply addServer@{
                         forEach {
-                            //确保服务器不重复
+                            // Make sure the same server is not added twice.
                             if (it.baseUrl == server.baseUrl) return@addServer
                         }
                         add(server)
                     }
+
                     Tools.write(
-                        mOtherServerConfigFile.absolutePath,
-                        Tools.GLOBAL_GSON.toJson(mOtherServerConfig, Servers::class.java)
+                        otherServerConfigFile.absolutePath,
+                        Tools.GLOBAL_GSON.toJson(otherServerConfig, Servers::class.java)
                     )
                 }
             }
         }.beforeStart(TaskExecutors.getAndroidUI()) {
-            mProgressDialog.show()
+            progressDialog.show()
         }.ended(TaskExecutors.getAndroidUI()) {
             refreshOtherServer()
-            mProgressDialog.dismiss()
+            progressDialog.dismiss()
         }.onThrowable { e ->
             Logging.e("Add Other Server", Tools.printToString(e))
         }.execute()
@@ -462,22 +522,25 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
             .setMessage(R.string.account_remove_login_type_message)
             .setWarning()
             .setConfirmClickListener {
-                checkServerConfig()
-                mOtherServerConfig?.server?.remove(server)
+                ensureServerConfig()
+                otherServerConfig?.server?.remove(server)
+
                 Tools.write(
-                    mOtherServerConfigFile.absolutePath,
-                    Tools.GLOBAL_GSON.toJson(mOtherServerConfig, Servers::class.java)
+                    otherServerConfigFile.absolutePath,
+                    Tools.GLOBAL_GSON.toJson(otherServerConfig, Servers::class.java)
                 )
+
                 refreshOtherServer()
-            }.showDialog()
+            }
+            .showDialog()
     }
 
-    private fun refreshActionPopupWindow(anchorView: View, binding: ViewBinding) {
-        mServerActionPopupWindow.apply {
-            binding.root.measure(0, 0)
-            this.contentView = binding.root
-            this.width = binding.root.measuredWidth
-            this.height = binding.root.measuredHeight
+    private fun refreshActionPopupWindow(anchorView: View, popupBinding: ViewBinding) {
+        serverActionPopupWindow.apply {
+            popupBinding.root.measure(0, 0)
+            contentView = popupBinding.root
+            width = popupBinding.root.measuredWidth
+            height = popupBinding.root.measuredHeight
             showAsDropDown(anchorView)
         }
     }
@@ -494,29 +557,45 @@ class AccountFragment : FragmentWithAnim(R.layout.fragment_account), View.OnClic
 
     @Subscribe(threadMode = ThreadMode.MAIN)
     fun event(event: AccountUpdateEvent) {
-        mAccountViewWrapper.refreshAccountInfo()
+        accountViewWrapper.refreshAccountInfo()
         reloadRecyclerView()
     }
 
     override fun onClick(v: View) {
         val activity = requireActivity()
+
         binding.apply {
             when (v) {
                 returnButton -> ZHTools.onBackPressed(activity)
+
                 addServer -> {
-                    refreshActionPopupWindow(v, ViewAddOtherServerBinding.inflate(LayoutInflater.from(activity)).apply {
-                        val onClickListener = View.OnClickListener { v1 ->
-                            when(v1) {
-                                addOtherServer -> showServerTypeSelectDialog(R.string.other_login_yggdrasil_api, 0)
-                                addUniformPass -> showServerTypeSelectDialog(R.string.other_login_32_bit_server, 1)
+                    refreshActionPopupWindow(
+                        v,
+                        ViewAddOtherServerBinding.inflate(LayoutInflater.from(activity)).apply {
+                            val clickListener = View.OnClickListener { clickedView ->
+                                when (clickedView) {
+                                    addOtherServer -> {
+                                        showServerTypeSelectDialog(
+                                            R.string.other_login_yggdrasil_api,
+                                            0
+                                        )
+                                    }
+
+                                    addUniformPass -> {
+                                        showServerTypeSelectDialog(
+                                            R.string.other_login_32_bit_server,
+                                            1
+                                        )
+                                    }
+                                }
+                                serverActionPopupWindow.dismiss()
                             }
-                            mServerActionPopupWindow.dismiss()
+
+                            addOtherServer.setOnClickListener(clickListener)
+                            addUniformPass.setOnClickListener(clickListener)
                         }
-                        addOtherServer.setOnClickListener(onClickListener)
-                        addUniformPass.setOnClickListener(onClickListener)
-                    })
+                    )
                 }
-                else -> {}
             }
         }
     }

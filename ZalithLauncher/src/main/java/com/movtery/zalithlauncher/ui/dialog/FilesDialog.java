@@ -24,9 +24,11 @@ public class FilesDialog extends FullScreenDialog implements DraggableDialog.Dia
     private final Task<?> mEndTask;
     private final File mRoot;
     private final List<File> mSelectedFiles;
+
     private String mFileSuffix;
     private OnCopyButtonClickListener mCopyClick;
     private OnMoreButtonClickListener mMoreClick;
+    private OnExtraButtonClickListener mExtraClick;
 
     public FilesDialog(@NonNull Context context, FilesButton filesButton, Task<?> endTask, File root, List<File> selectedFiles) {
         super(context);
@@ -54,14 +56,21 @@ public class FilesDialog extends FullScreenDialog implements DraggableDialog.Dia
     }
 
     private void init(FilesButton filesButton) {
-        this.setCancelable(true);
-        this.setContentView(binding.getRoot());
+        setCancelable(true);
+        setContentView(binding.getRoot());
 
-        binding.closeButton.setOnClickListener(v -> this.dismiss());
+        binding.closeButton.setOnClickListener(v -> dismiss());
 
         if (filesButton.more) {
             binding.moreView.setOnClickListener(v -> {
-                if (this.mMoreClick != null) this.mMoreClick.onButtonClick();
+                if (mMoreClick != null) mMoreClick.onButtonClick();
+                closeDialog();
+            });
+        }
+
+        if (filesButton.extra) {
+            binding.extraView.setOnClickListener(v -> {
+                if (mExtraClick != null) mExtraClick.onButtonClick();
                 closeDialog();
             });
         }
@@ -77,30 +86,39 @@ public class FilesDialog extends FullScreenDialog implements DraggableDialog.Dia
         });
 
         PasteFile pasteFile = PasteFile.getInstance();
+
         binding.copyView.setOnClickListener(v -> {
-            if (this.mCopyClick != null) {
-                pasteFile.setPaste(mRoot, mSelectedFiles, PasteFile.PasteType.COPY); // 复制模式
-                this.mCopyClick.onButtonClick();
-            }
-            closeDialog();
-        });
-        binding.moveView.setOnClickListener(v -> {
-            if (this.mCopyClick != null) {
-                pasteFile.setPaste(mRoot, mSelectedFiles, PasteFile.PasteType.MOVE); // 移动模式
-                this.mCopyClick.onButtonClick();
+            if (mCopyClick != null) {
+                pasteFile.setPaste(mRoot, mSelectedFiles, PasteFile.PasteType.COPY);
+                mCopyClick.onButtonClick();
             }
             closeDialog();
         });
 
-        if (mSelectedFiles.size() == 1) { //单选模式
+        binding.moveView.setOnClickListener(v -> {
+            if (mCopyClick != null) {
+                pasteFile.setPaste(mRoot, mSelectedFiles, PasteFile.PasteType.MOVE);
+                mCopyClick.onButtonClick();
+            }
+            closeDialog();
+        });
+
+        if (mSelectedFiles.size() == 1) {
             File file = mSelectedFiles.get(0);
+
             binding.shareView.setOnClickListener(view -> {
                 FileTools.shareFile(getContext(), file);
                 closeDialog();
             });
+
             binding.renameView.setOnClickListener(view -> {
                 if (file.isFile()) {
-                    FileTools.renameFileListener(getContext(), endTask, file, mFileSuffix == null ? file.getName().substring(file.getName().lastIndexOf('.')) : mFileSuffix);
+                    FileTools.renameFileListener(
+                            getContext(),
+                            endTask,
+                            file,
+                            mFileSuffix == null ? file.getName().substring(file.getName().lastIndexOf('.')) : mFileSuffix
+                    );
                 } else if (file.isDirectory()) {
                     FileTools.renameFileListener(getContext(), endTask, file);
                 }
@@ -110,7 +128,7 @@ public class FilesDialog extends FullScreenDialog implements DraggableDialog.Dia
             setButtonClickable(filesButton.share, binding.shareView);
             setButtonClickable(filesButton.rename, binding.renameView);
         } else {
-            //多选模式禁止使用分享、重命名
+            // Disable share and rename in multi-select mode.
             setButtonClickable(false, binding.shareView);
             setButtonClickable(false, binding.renameView);
         }
@@ -121,21 +139,25 @@ public class FilesDialog extends FullScreenDialog implements DraggableDialog.Dia
         setButtonClickable(filesButton.copy, binding.copyView);
         setButtonClickable(filesButton.move, binding.moveView);
         setButtonClickable(filesButton.more, binding.moreView);
+        setButtonClickable(filesButton.extra, binding.extraView);
     }
 
     private void setDialogTexts(FilesButton filesButton, File file) {
         if (filesButton.titleText != null) binding.titleView.setText(filesButton.titleText);
         if (filesButton.messageText != null) binding.messageView.setText(filesButton.messageText);
         if (filesButton.moreButtonText != null) binding.moreTextView.setText(filesButton.moreButtonText);
-        if (file != null && file.isDirectory())
+        if (filesButton.extraButtonText != null) binding.extraTextView.setText(filesButton.extraButtonText);
+
+        if (file != null && file.isDirectory()) {
             binding.titleView.setText(getContext().getString(R.string.file_folder_tips));
+        }
     }
 
     private void closeDialog() {
-        FilesDialog.this.dismiss();
+        dismiss();
     }
 
-    //此方法要在设置点击事件之后调用，否则禁用按钮后按钮仍然能够点击
+    // Call this after assigning click listeners, otherwise disabled buttons may still respond.
     private void setButtonClickable(boolean clickable, RelativeLayout button) {
         button.setClickable(clickable);
         button.setAlpha(clickable ? 1f : 0.5f);
@@ -147,6 +169,10 @@ public class FilesDialog extends FullScreenDialog implements DraggableDialog.Dia
 
     public void setMoreButtonClick(OnMoreButtonClickListener click) {
         this.mMoreClick = click;
+    }
+
+    public void setExtraButtonClick(OnExtraButtonClickListener click) {
+        this.mExtraClick = click;
     }
 
     public void setFileSuffix(String suffixes) {
@@ -166,17 +192,34 @@ public class FilesDialog extends FullScreenDialog implements DraggableDialog.Dia
         void onButtonClick();
     }
 
+    public interface OnExtraButtonClickListener {
+        void onButtonClick();
+    }
+
     public static class FilesButton {
-        private boolean copy, move, share, rename, delete, more;
-        private String titleText, messageText, moreButtonText;
+        private boolean copy, move, share, rename, delete, more, extra;
+        private String titleText, messageText, moreButtonText, extraButtonText;
 
         public void setButtonVisibility(boolean copy, boolean move, boolean shareButton, boolean renameButton, boolean deleteButton, boolean moreButton) {
+            setButtonVisibility(copy, move, shareButton, renameButton, deleteButton, moreButton, false);
+        }
+
+        public void setButtonVisibility(
+                boolean copy,
+                boolean move,
+                boolean shareButton,
+                boolean renameButton,
+                boolean deleteButton,
+                boolean moreButton,
+                boolean extraButton
+        ) {
             this.copy = copy;
             this.move = move;
             this.share = shareButton;
             this.rename = renameButton;
             this.delete = deleteButton;
             this.more = moreButton;
+            this.extra = extraButton;
         }
 
         public void setDialogText(String titleText, String messageText, String moreButtonText) {
@@ -195,6 +238,10 @@ public class FilesDialog extends FullScreenDialog implements DraggableDialog.Dia
 
         public void setMoreButtonText(String moreButtonText) {
             this.moreButtonText = moreButtonText;
+        }
+
+        public void setExtraButtonText(String extraButtonText) {
+            this.extraButtonText = extraButtonText;
         }
     }
 }

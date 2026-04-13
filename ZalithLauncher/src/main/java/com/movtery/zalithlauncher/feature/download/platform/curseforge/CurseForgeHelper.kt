@@ -93,7 +93,9 @@ class CurseForgeHelper : AbstractPlatformHelper(PlatformUtils.createCurseForgeAp
 
     @Throws(Throwable::class)
     override fun installMod(infoItem: InfoItem, version: VersionItem, targetPath: File, progressKey: String) {
-        InstallHelper.downloadFile(version, targetPath, progressKey)
+        com.movtery.zalithlauncher.task.Task.runTask {
+            CurseForgeAutoInstallHelper.installModWithDependencies(api, infoItem, version, targetPath, progressKey)
+        }.execute()
     }
 
     @Throws(Throwable::class)

@@ -1,63 +1,67 @@
 package com.movtery.zalithlauncher.feature.download.enums
 
 /**
- * Mod的依赖类型，并且为每一个类型单独指定一个代表色，便于区分
- * @param curseforge 类型在 CurseForge 上的代称
- * @param modrinth 类型在 Modrinth 上的代称
- * @param color 该类型的代表色
+ * Dependency relation type for mods, with a dedicated color for each type so the UI can
+ * distinguish them more easily.
+ *
+ * @param curseforge Type identifier used by CurseForge.
+ * @param modrinth Type identifier used by Modrinth.
+ * @param color Display color for this dependency type.
  */
 enum class DependencyType(val curseforge: String?, val modrinth: String?, val color: Int) {
     /**
-     * 需装：这种依赖对项目来说是必须的，如果缺少这种依赖，项目将无法正常运行
+     * Required: this dependency is mandatory. Without it, the project will not run correctly.
      *
      * CurseForge: "3"
      * Modrinth: "required"
-     * 颜色：0x4CFF9800（橙色，Alpha 30%）
+     * Color: 0x4CFF9800 (orange, 30% alpha)
      */
     REQUIRED("3", "required", 0x4CFF9800),
 
     /**
-     * 可选：这些依赖不是必须的，但可以为项目添加额外的功能或特性
+     * Optional: this dependency is not required, but may add extra features or integrations.
      *
      * CurseForge: "2"
      * Modrinth: "optional"
-     * 颜色：0x4C34C759（浅绿色，Alpha 30%）
+     * Color: 0x4C34C759 (light green, 30% alpha)
      */
     OPTIONAL("2", "optional", 0x4C34C759),
 
     /**
-     * 不兼容：这种依赖表示项目与其他特定的项目或依赖有冲突，不建议同时使用，如果尝试同时使用这些依赖，可能会导致错误或故障
+     * Incompatible: this indicates a conflict with another project or dependency and should not
+     * be installed together.
      *
      * CurseForge: "5"
      * Modrinth: "incompatible"
-     * 颜色：0x4CEF5350（浅红色，Alpha 30%）
+     * Color: 0x4CEF5350 (light red, 30% alpha)
      */
     INCOMPATIBLE("5", "incompatible", 0x4CEF5350),
 
     /**
-     * 嵌入式：这些依赖已经包含在项目内，用户不需要单独安装，它们是项目的一部分，用于确保项目正常运行
+     * Embedded: this dependency is already bundled inside the project, so the user does not need
+     * to install it separately.
      *
      * CurseForge: "1"
      * Modrinth: "embedded"
-     * 颜色：0x4CFFD54F（浅黄色，Alpha 30%）
+     * Color: 0x4CFFD54F (light yellow, 30% alpha)
      */
     EMBEDDED("1", "embedded", 0x4CFFD54F),
 
     /**
-     * 工具：这类依赖是用于开发或操作项目的工具，它们本身并不是项目运行所必需的
+     * Tool: this dependency is used for development or tooling, and is not required to run the project.
      *
      * CurseForge: "4"
      * Modrinth: null
-     * 颜色：0x4CBDBDBD（灰色，Alpha 30%）
+     * Color: 0x4CBDBDBD (gray, 30% alpha)
      */
     TOOL("4", null, 0x4CBDBDBD),
 
     /**
-     * 包含：这种依赖是指项目所包含的文件或资源，虽然它们不是项目的核心功能，但可以为项目提供额外的支持或功能
+     * Include: additional bundled support files or resources associated with the project.
      *
      * CurseForge: "6"
      * Modrinth: null
-     * 颜色：0x4C9575CD（紫色，Alpha 30%）
+     * Color: 0x4C9575CD (purple, 30% alpha)
      */
     INCLUDE("6", null, 0x4C9575CD)
 }

@@ -80,7 +80,7 @@ public class FileRecyclerAdapter extends RecyclerView.Adapter<FileRecyclerAdapte
     public void setMultiSelectMode(boolean multiSelectMode) {
         isMultiSelectMode = multiSelectMode;
         if (!multiSelectMode) {
-            selectedFiles.clear(); // 退出多选模式时重置选择的文件
+            selectedFiles.clear();
         }
         notifyDataSetChanged();
     }
@@ -88,7 +88,7 @@ public class FileRecyclerAdapter extends RecyclerView.Adapter<FileRecyclerAdapte
     @SuppressLint("NotifyDataSetChanged")
     public void selectAllFiles(boolean selectAll) {
         selectedFiles.clear();
-        if (selectAll) { //全选时遍历全部item设置选择状态
+        if (selectAll) {
             for (FileItemBean item : mData) {
                 if (item.isCanCheck) {
                     selectedFiles.add(item);
@@ -142,6 +142,7 @@ public class FileRecyclerAdapter extends RecyclerView.Adapter<FileRecyclerAdapte
                     toggleSelection(mFileItemBean, binding.check);
                 }
             });
+
             if (mOnItemClickListener != null) {
                 itemView.setOnClickListener(v -> {
                     if (isMultiSelectMode) {
@@ -151,13 +152,16 @@ public class FileRecyclerAdapter extends RecyclerView.Adapter<FileRecyclerAdapte
                     }
                 });
             }
+
             itemView.setOnLongClickListener(v -> {
                 if (isMultiSelectMode) {
-                    if (mOnMultiSelectListener != null)
+                    if (mOnMultiSelectListener != null) {
                         mOnMultiSelectListener.onMultiSelect(getSelectedFiles());
+                    }
                 } else {
-                    if (mOnItemLongClickListener != null)
+                    if (mOnItemLongClickListener != null) {
                         mOnItemLongClickListener.onItemLongClick(mPosition, mFileItemBean);
+                    }
                 }
                 return true;
             });
@@ -167,31 +171,71 @@ public class FileRecyclerAdapter extends RecyclerView.Adapter<FileRecyclerAdapte
             mPosition = position;
             mFileItemBean = fileItemBean;
             File file = fileItemBean.file;
+            FileItemBean.UpdateUiStatus status = fileItemBean.updateStatus;
 
-            binding.name.setText(fileItemBean.name);
+            String baseTitle = fileItemBean.displayName != null && !fileItemBean.displayName.isEmpty()
+                    ? fileItemBean.displayName
+                    : fileItemBean.name;
+
+            if (fileItemBean.isDisabled) {
+                baseTitle = baseTitle + " (Disabled)";
+            }
+
+            if (status == FileItemBean.UpdateUiStatus.UPDATE_AVAILABLE) {
+                baseTitle = baseTitle + " (Update Available)";
+            } else if (status == FileItemBean.UpdateUiStatus.UP_TO_DATE) {
+                baseTitle = baseTitle + " (Up to Date)";
+            } else if (status == FileItemBean.UpdateUiStatus.UNKNOWN) {
+                baseTitle = baseTitle + " (Unknown)";
+            }
+
+            binding.name.setText(baseTitle);
 
             int infoLayoutVisible = View.GONE;
-            if (fileItemBean.date != null) {
+
+            if (fileItemBean.updateText != null && !fileItemBean.updateText.isEmpty()) {
+                binding.time.setText(fileItemBean.updateText);
+                binding.time.setVisibility(View.VISIBLE);
+                infoLayoutVisible = View.VISIBLE;
+            } else if (fileItemBean.modVersion != null && !fileItemBean.modVersion.isEmpty()) {
+                binding.time.setText("v" + fileItemBean.modVersion);
+                binding.time.setVisibility(View.VISIBLE);
+                infoLayoutVisible = View.VISIBLE;
+            } else if (fileItemBean.date != null) {
                 String date = StringUtils.formatDate(fileItemBean.date, Locale.getDefault(), TimeZone.getDefault());
                 binding.time.setText(date);
                 binding.time.setVisibility(View.VISIBLE);
                 infoLayoutVisible = View.VISIBLE;
-            } else binding.time.setVisibility(View.GONE);
+            } else {
+                binding.time.setVisibility(View.GONE);
+            }
 
             if (fileItemBean.size != null) {
                 String size = FileTools.formatFileSize(fileItemBean.size);
                 binding.size.setText(size);
                 binding.size.setVisibility(View.VISIBLE);
                 infoLayoutVisible = View.VISIBLE;
-            } else binding.size.setVisibility(View.GONE);
+            } else {
+                binding.size.setVisibility(View.GONE);
+            }
 
             binding.infoLayout.setVisibility(infoLayoutVisible);
 
             if (fileItemBean.isHighlighted) {
-                binding.name.setTextColor(Color.rgb(69, 179, 162)); //设置高亮
+                binding.name.setTextColor(Color.rgb(69, 179, 162));
+            } else if (status == FileItemBean.UpdateUiStatus.UPDATE_AVAILABLE) {
+                binding.name.setTextColor(Color.rgb(255, 152, 0));
             } else {
-                binding.name.setTextColor(binding.name.getResources().getColor(R.color.black_or_white, binding.name.getContext().getTheme()));
+                binding.name.setTextColor(binding.name.getResources().getColor(
+                        R.color.black_or_white,
+                        binding.name.getContext().getTheme()
+                ));
             }
+
+            float alpha = fileItemBean.isDisabled ? 0.55f : 1.0f;
+            binding.image.setAlpha(alpha);
+            binding.name.setAlpha(alpha);
+            binding.infoLayout.setAlpha(alpha);
 
             if (fileItemBean.isCanCheck) {
                 binding.check.setVisibility(isMultiSelectMode ? View.VISIBLE : View.GONE);

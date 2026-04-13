@@ -5,7 +5,10 @@ import com.movtery.zalithlauncher.feature.download.enums.VersionType
 import java.util.Date
 
 /**
- * @param dependencies 该版本的依赖 Mod 的信息
+ * Version information for a mod.
+ *
+ * @param dependencies Human-friendly dependency information used by the UI.
+ * @param dependencyRefs Exact Modrinth dependency references used for installation.
  */
 class ModVersionItem(
     projectId: String,
@@ -18,9 +21,19 @@ class ModVersionItem(
     fileHash: String?,
     fileUrl: String,
     modloaders: List<ModLoader>,
-    val dependencies: List<DependenciesInfoItem>
+    val dependencies: List<DependenciesInfoItem>,
+    val dependencyRefs: List<ModrinthDependencyRef> = emptyList()
 ) : ModLikeVersionItem(
-    projectId, title, downloadCount, uploadDate, mcVersions, versionType, fileName, fileHash, fileUrl, modloaders
+    projectId,
+    title,
+    downloadCount,
+    uploadDate,
+    mcVersions,
+    versionType,
+    fileName,
+    fileHash,
+    fileUrl,
+    modloaders
 ) {
     override fun toString(): String {
         return "ModVersionItem(" +
@@ -30,11 +43,12 @@ class ModVersionItem(
                 "uploadDate=$uploadDate, " +
                 "mcVersions=$mcVersions, " +
                 "versionType=$versionType, " +
-                "fileName=$fileName" +
+                "fileName='$fileName', " +
                 "fileHash='$fileHash', " +
                 "fileUrl='$fileUrl', " +
-                "modloaders=$modloaders" +
-                "dependencies=$dependencies" +
+                "modloaders=$modloaders, " +
+                "dependencies=$dependencies, " +
+                "dependencyRefs=$dependencyRefs" +
                 ")"
     }
 }

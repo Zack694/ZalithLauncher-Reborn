@@ -45,30 +45,30 @@
                 android:id="@+id/nothing_layout"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginHorizontal="@dimen/_8sdp"
                 android:background="@drawable/background_item"
                 android:padding="@dimen/_8sdp"
-                android:layout_marginHorizontal="@dimen/_8sdp"
                 android:visibility="gone"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toTopOf="parent" >
+                app:layout_constraintTop_toTopOf="parent">
 
                 <TextView
                     android:id="@+id/nothing_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/file_nothing"
-                    android:layout_marginStart="@dimen/_8sdp" />
+                    android:layout_marginStart="@dimen/_8sdp"
+                    android:text="@string/file_nothing" />
 
                 <com.movtery.zalithlauncher.ui.view.AnimTextView
                     android:id="@+id/go_download_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="@dimen/_8sdp"
                     android:background="@drawable/button_background"
                     android:text="@string/profile_mods_download_mod"
-                    android:layout_marginHorizontal="@dimen/_8sdp"
-                    app:ripple_for_text="true"/>
+                    app:ripple_for_text="true" />
 
             </androidx.appcompat.widget.LinearLayoutCompat>
 
@@ -76,9 +76,10 @@
                 android:id="@+id/title_layout"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                app:layout_constraintTop_toTopOf="parent"
+                android:minHeight="@dimen/_52sdp"
                 app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintStart_toStartOf="parent">
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent">
 
                 <TextView
                     android:id="@+id/title_view"
@@ -88,7 +89,111 @@
                     android:layout_marginTop="@dimen/_8sdp"
                     android:text="@string/version_manager_shortcuts_mods"
                     android:textColor="@color/primary_text"
+                    android:textStyle="bold"
                     app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toTopOf="parent" />
+
+                <TextView
+                    android:id="@+id/version_debug_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/_8sdp"
+                    android:layout_marginTop="@dimen/_2sdp"
+                    android:alpha="0.75"
+                    android:text="MC: unknown"
+                    android:textColor="@color/primary_text"
+                    android:textSize="@dimen/_8sdp"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toBottomOf="@id/title_view" />
+
+                <LinearLayout
+                    android:id="@+id/update_actions_row"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="@dimen/_8sdp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    app:layout_constraintEnd_toStartOf="@id/show_updates_only"
+                    app:layout_constraintTop_toTopOf="parent">
+
+                    <ImageView
+                        android:id="@+id/modrinth_icon"
+                        android:layout_width="@dimen/_18sdp"
+                        android:layout_height="@dimen/_18sdp"
+                        android:layout_marginEnd="@dimen/_4sdp"
+                        android:contentDescription="Modrinth"
+                        android:src="@drawable/ic_modrinth" />
+
+                    <com.movtery.zalithlauncher.ui.view.AnimTextView
+                        android:id="@+id/check_updates_modrinth_button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="@dimen/_10sdp"
+                        android:background="@drawable/button_background"
+                        android:gravity="center"
+                        android:minWidth="@dimen/_82sdp"
+                        android:minHeight="@dimen/_32sdp"
+                        android:paddingHorizontal="@dimen/_12sdp"
+                        android:paddingVertical="@dimen/_6sdp"
+                        android:text="Modrinth"
+                        android:textColor="@color/primary_text"
+                        android:textSize="@dimen/_10sdp"
+                        android:textStyle="bold"
+                        app:ripple_for_text="true" />
+
+                    <ImageView
+                        android:id="@+id/curseforge_icon"
+                        android:layout_width="@dimen/_18sdp"
+                        android:layout_height="@dimen/_18sdp"
+                        android:layout_marginEnd="@dimen/_4sdp"
+                        android:visibility="gone"
+                        android:contentDescription="CurseForge"
+                        android:src="@drawable/ic_curseforge" />
+
+                    <com.movtery.zalithlauncher.ui.view.AnimTextView
+                        android:id="@+id/check_updates_curseforge_button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/button_background"
+                        android:gravity="center"
+                        android:minWidth="@dimen/_92sdp"
+                        android:minHeight="@dimen/_32sdp"
+                        android:paddingHorizontal="@dimen/_12sdp"
+                        android:paddingVertical="@dimen/_6sdp"
+                        android:text="CurseForge"
+                        android:visibility="gone"
+                        android:textColor="@color/primary_text"
+                        android:textSize="@dimen/_10sdp"
+                        android:textStyle="bold"
+                        app:ripple_for_text="true" />
+
+                </LinearLayout>
+                <TextView
+                    android:id="@+id/update_actions_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/_2sdp"
+                    android:layout_marginEnd="@dimen/_8sdp"
+                    android:alpha="0.72"
+                    android:text="Check for mod updates"
+                    android:textColor="@color/primary_text"
+                    android:textSize="@dimen/_8sdp"
+                    app:layout_constraintEnd_toEndOf="@id/update_actions_row"
+                    app:layout_constraintStart_toStartOf="@id/update_actions_row"
+                    app:layout_constraintTop_toBottomOf="@id/update_actions_row" />
+
+                <com.movtery.zalithlauncher.ui.view.AnimCheckBox
+                    android:id="@+id/show_updates_only"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="@dimen/_8sdp"
+                    android:text="Updates only"
+                    android:textColor="@color/primary_text"
+                    android:textSize="@dimen/_9sdp"
+                    android:visibility="gone"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    app:layout_constraintEnd_toStartOf="@id/select_all"
                     app:layout_constraintTop_toTopOf="parent" />
 
                 <com.movtery.zalithlauncher.ui.view.AnimCheckBox
@@ -97,9 +202,9 @@
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="@dimen/_16sdp"
                     android:visibility="gone"
-                    app:layout_constraintTop_toTopOf="parent"
                     app:layout_constraintBottom_toBottomOf="parent"
-                    app:layout_constraintEnd_toEndOf="parent" />
+                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintTop_toTopOf="parent" />
 
             </androidx.constraintlayout.widget.ConstraintLayout>
 
@@ -131,10 +236,10 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:background="@color/menu_overlay"
-            app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintStart_toEndOf="@+id/shadowView">
+            app:layout_constraintStart_toEndOf="@+id/shadowView"
+            app:layout_constraintTop_toTopOf="parent">
 
             <androidx.constraintlayout.widget.ConstraintLayout
                 android:id="@+id/operate_buttons_layout"
@@ -163,7 +268,7 @@
                     android:layout_marginBottom="@dimen/_26sdp"
                     app:layout_constraintBottom_toBottomOf="parent"
                     app:layout_constraintEnd_toEndOf="parent"
-                    app:layout_constraintStart_toStartOf="parent"/>
+                    app:layout_constraintStart_toStartOf="parent" />
 
             </androidx.constraintlayout.widget.ConstraintLayout>
         </androidx.constraintlayout.widget.ConstraintLayout>

@@ -81,7 +81,13 @@ class VersionManagerFragment : FragmentWithAnim(R.layout.fragment_version_manage
             when (v) {
                 shortcutsMods -> {
                     val bundle = Bundle()
+
                     bundle.putString(ModsFragment.BUNDLE_ROOT_PATH, File(gameDirPath, "/mods").mustExists().absolutePath)
+                    // Get MC Version so that when checking for updates we check for the right version of the game not all versions latest DNA Mobile
+                    bundle.putString(
+                        ModsFragment.BUNDLE_MC_VERSION,
+                        version.getVersionInfo()?.minecraftVersion
+                    )
                     ZHTools.swapFragmentWithAnim(this@VersionManagerFragment, ModsFragment::class.java, ModsFragment.TAG, bundle)
                 }
                 gamePath -> swapFilesFragment(gameDirPath, gameDirPath)
@@ -95,7 +101,7 @@ class VersionManagerFragment : FragmentWithAnim(R.layout.fragment_version_manage
                 versionSettings -> ZHTools.swapFragmentWithAnim(this@VersionManagerFragment, VersionConfigFragment::class.java, VersionConfigFragment.TAG, null)
                 versionRename -> {
                     VersionsManager.openRenameDialog(activity, version) {
-                        Tools.backToMainMenu(activity) //重命名前，为了不出现问题，需要退出当前Fragment
+                        Tools.backToMainMenu(activity) // Exit the current fragment before renaming to avoid state issues.
                     }
                 }
                 versionCopy -> VersionsManager.openCopyDialog(activity, version)
@@ -134,5 +140,11 @@ class VersionManagerFragment : FragmentWithAnim(R.layout.fragment_version_manage
             animPlayer.apply(AnimPlayer.Entry(shortcutsLayout, Animations.FadeOutLeft))
                 .apply(AnimPlayer.Entry(editLayout, Animations.FadeOutRight))
         }
+    }
+    private fun extractMinecraftVersion(versionName: String?): String? {
+        if (versionName.isNullOrBlank()) return null
+
+        val match = Regex("""\d+\.\d+(?:\.\d+)?""").find(versionName)
+        return match?.value
     }
 }

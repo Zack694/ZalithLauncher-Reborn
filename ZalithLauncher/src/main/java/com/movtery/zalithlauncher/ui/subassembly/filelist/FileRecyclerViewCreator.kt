@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.movtery.zalithlauncher.R
+import com.movtery.zalithlauncher.feature.mod.ModJarIconHelper
 import com.movtery.zalithlauncher.feature.mod.ModUtils
 import com.movtery.zalithlauncher.ui.subassembly.filelist.FileRecyclerAdapter.OnMultiSelectListener
 import com.movtery.zalithlauncher.utils.stringutils.StringFilter.Companion.containsSubstring
@@ -68,7 +69,9 @@ class FileRecyclerViewCreator(
         fileRecyclerAdapter.updateItems(
             filterString?.takeIf { it.isNotEmpty() }?.let { string ->
                 itemBeans.filter {
-                    it.name.contains(string, true)
+                    it.name.contains(string, true) ||
+                            (!it.displayName.isNullOrEmpty() && it.displayName!!.contains(string, true)) ||
+                            (!it.subtitle.isNullOrEmpty() && it.subtitle!!.contains(string, true))
                 }
             } ?: itemBeans
         )
@@ -84,8 +87,12 @@ class FileRecyclerViewCreator(
     }
 
     companion object {
-        fun loadItemBeansFromPath(context: Context, path: File, fileIcon: FileIcon,
-            showFile: Boolean, showFolder: Boolean
+        fun loadItemBeansFromPath(
+            context: Context,
+            path: File,
+            fileIcon: FileIcon,
+            showFile: Boolean,
+            showFolder: Boolean
         ): MutableList<FileItemBean> {
             return loadItemBeansFromPath(
                 context,
@@ -115,12 +122,16 @@ class FileRecyclerViewCreator(
         ): MutableList<FileItemBean> {
             val itemBeans: MutableList<FileItemBean> = ArrayList()
             val files = path.listFiles()
+
             if (files != null) {
                 val resources = context.resources
+
                 for (file in files) {
                     if (!showFileOrFolder(file, showFile, showFolder)) continue
 
                     val itemBean = FileItemBean(file)
+                    itemBean.isDisabled = file.name.endsWith(ModUtils.DISABLE_JAR_FILE_SUFFIX)
+
                     if (!filterString.isNullOrEmpty()) {
                         if (containsSubstring(file.name, filterString, caseSensitive)) {
                             itemBean.isHighlighted = true
@@ -129,15 +140,42 @@ class FileRecyclerViewCreator(
                             continue
                         }
                     }
+
+                    // Always assign a fallback icon first.
                     itemBean.image = getIcon(context, file, fileIcon, resources)
+
+                    if (
+                        fileIcon == FileIcon.MOD &&
+                        file.isFile &&
+                        (file.name.endsWith(ModUtils.JAR_FILE_SUFFIX) ||
+                                file.name.endsWith(ModUtils.DISABLE_JAR_FILE_SUFFIX))
+                    ) {
+                        val modInfo = ModJarIconHelper.read(context, file)
+                        if (modInfo != null) {
+                            if (!modInfo.displayName.isNullOrBlank()) {
+                                itemBean.displayName = modInfo.displayName
+                                itemBean.subtitle = file.name
+                            }
+
+                            if (!modInfo.version.isNullOrBlank()) {
+                                itemBean.modVersion = modInfo.version
+                            }
+
+                            if (modInfo.iconDrawable != null) {
+                                itemBean.image = modInfo.iconDrawable
+                            }
+                        }
+                    }
+
                     itemBeans.add(itemBean)
                 }
             }
+
             return itemBeans
         }
 
         private fun showFileOrFolder(file: File, showFile: Boolean, showFolder: Boolean): Boolean {
-            //显示文件与显示文件夹
+            // Respect the current show-files / show-folders settings.
             if (file.isDirectory && !showFolder) return false
             return !file.isFile || showFile
         }

@@ -7,8 +7,8 @@ on:
 
 jobs:
   BuildRelease:
-    # Removed the 'ZalithLauncher' owner check so it runs on your fork
-    if: !startsWith(github.ref, 'refs/pull/') && github.ref_name == 'main'
+    # Quoted to prevent YAML syntax errors with the '!' character
+    if: "!startsWith(github.ref, 'refs/pull/') && github.ref_name == 'main'"
     runs-on: ubuntu-22.04
     strategy:
       matrix:
@@ -28,7 +28,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # NEW: Decodes your Base64 secret into the actual .jks file for signing
       - name: Decode Keystore
         run: |
           echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ZalithLauncher/release.jks
@@ -41,12 +40,10 @@ jobs:
 
       - name: Build Release ${{ matrix.arch }}
         env:
-          # Using your secrets for the signing process
           MOVTERY_KEYSTORE_PASSWORD: ${{ secrets.MOVTERY_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.RELEASE_ALIAS }}
         run: |
           chmod +x gradlew
-          # We pass the signing info directly to Gradle here
           ./gradlew ZalithLauncher:assemblerelease -Darch=${{ matrix.arch }} \
             -Pandroid.injected.signing.store.file=release.jks \
             -Pandroid.injected.signing.store.password=$MOVTERY_KEYSTORE_PASSWORD \
@@ -61,7 +58,7 @@ jobs:
           path: ZalithLauncher/build/outputs/apk/release/*
 
   BuildDebug:
-    if: startsWith(github.ref, 'refs/pull/') || github.ref_name != 'main'
+    if: "startsWith(github.ref, 'refs/pull/') || github.ref_name != 'main'"
     runs-on: ubuntu-22.04
     strategy:
       matrix:

@@ -61,7 +61,7 @@ public class ControlData {
     public String dynamicX, dynamicY;
     public boolean isToggle, passThruEnabled;
     public String name;
-    public int[] keycodes;      //Should store up to 4 keys
+    public int[] keycodes;      // CHANGED: Should store up to 6 keys now
     public float opacity;       //Alpha value from 0 to 1;
     public int bgColor;
     public int strokeColor;
@@ -195,9 +195,10 @@ public class ControlData {
         return (float) builder.get().build().evaluate();
     }
 
+    // CHANGED: Inflate array to size 6 instead of 4
     private static int[] inflateKeycodeArray(int[] keycodes) {
-        int[] inflatedArray = new int[]{GLFW_KEY_UNKNOWN, GLFW_KEY_UNKNOWN, GLFW_KEY_UNKNOWN, GLFW_KEY_UNKNOWN};
-        System.arraycopy(keycodes, 0, inflatedArray, 0, keycodes.length);
+        int[] inflatedArray = new int[]{GLFW_KEY_UNKNOWN, GLFW_KEY_UNKNOWN, GLFW_KEY_UNKNOWN, GLFW_KEY_UNKNOWN, GLFW_KEY_UNKNOWN, GLFW_KEY_UNKNOWN};
+        System.arraycopy(keycodes, 0, inflatedArray, 0, Math.min(keycodes.length, 6));
         return inflatedArray;
     }
 

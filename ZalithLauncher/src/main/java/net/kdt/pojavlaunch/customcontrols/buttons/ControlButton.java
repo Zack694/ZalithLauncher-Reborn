@@ -187,13 +187,22 @@ public class ControlButton extends TextView implements ControlInterface {
         return false;
     }
 
+    // FIXED: This method now processes regular keys first, then special keys
+    // This ensures predictable order when releasing mixed key bindings
     public void sendKeyPresses(boolean isDown){
         setActivated(isDown);
+
+        // First pass: Process all regular keyboard keys
         for(int keycode : mProperties.keycodes){
             if(keycode >= GLFW_KEY_UNKNOWN){
                 sendKeyPress(keycode, CallbackBridge.getCurrentMods(), isDown);
                 CallbackBridge.setModifiers(keycode, isDown);
-            }else{
+            }
+        }
+
+        // Second pass: Process all special keys (mouse buttons, etc.)
+        for(int keycode : mProperties.keycodes){
+            if(keycode < GLFW_KEY_UNKNOWN){
                 sendSpecialKey(keycode, isDown);
             }
         }

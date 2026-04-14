@@ -114,7 +114,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@+id/editMapping_textView" />
 
-
         <Spinner
             android:id="@+id/editMapping_spinner_2"
             android:layout_width="0dp"
@@ -142,7 +141,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="@+id/mapping_3_textview" />
 
-
         <Spinner
             android:id="@+id/editMapping_spinner_4"
             android:layout_width="0dp"
@@ -155,11 +153,40 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="@+id/mapping_3_textview" />
 
+        <!-- NEW: Spinner 5 -->
+        <Spinner
+            android:id="@+id/editMapping_spinner_5"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/_30sdp"
+            android:background="@android:color/transparent"
+            android:dropDownWidth="match_parent"
+            android:dropDownVerticalOffset="@dimen/_30sdp"
+            android:gravity="center"
+            android:visibility="invisible"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="@+id/mapping_5_textview" />
+
+        <!-- NEW: Spinner 6 -->
+        <Spinner
+            android:id="@+id/editMapping_spinner_6"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/_30sdp"
+            android:background="@android:color/transparent"
+            android:dropDownWidth="match_parent"
+            android:dropDownVerticalOffset="@dimen/_30sdp"
+            android:gravity="center"
+            android:visibility="invisible"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="@+id/mapping_5_textview" />
+
         <!-- Clickable textview linked to the spinners
             Spinners are hidden at the same place because the dropdown offset doesn't work
             Do those textview acts as the spinner idle state
         -->
 
+        <!-- ROW 1: Bindings 1 & 2 -->
         <TextView
             android:id="@+id/mapping_1_textview"
             style="?android:attr/spinnerItemStyle"
@@ -199,6 +226,7 @@
             app:layout_constraintTop_toTopOf="@+id/mapping_1_textview"
             tools:text="HELLO" />
 
+        <!-- ROW 2: Bindings 3 & 4 -->
         <TextView
             android:id="@+id/mapping_3_textview"
             style="?android:attr/spinnerItemStyle"
@@ -238,8 +266,49 @@
             app:layout_constraintTop_toTopOf="@id/mapping_3_textview"
             tools:text="HELLO" />
 
+        <!-- NEW ROW 3: Bindings 5 & 6 -->
+        <TextView
+            android:id="@+id/mapping_5_textview"
+            style="?android:attr/spinnerItemStyle"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/_30sdp"
+            android:ellipsize="marquee"
+            android:gravity="center"
+            android:singleLine="true"
+            android:textAlignment="inherit"
+            app:layout_constraintEnd_toStartOf="@id/mapping_6_textview"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/mapping_3_textview"
+            tools:text="HELLO" />
+
+        <TextView
+            android:id="@+id/editMapping_plus_5"
+            android:layout_width="wrap_content"
+            android:layout_height="0dp"
+            android:gravity="center"
+            android:text="+"
+            app:layout_constraintBottom_toBottomOf="@+id/mapping_5_textview"
+            app:layout_constraintEnd_toEndOf="@+id/mapping_5_textview"
+            app:layout_constraintStart_toEndOf="@id/mapping_5_textview"
+            app:layout_constraintTop_toBottomOf="@+id/mapping_3_textview" />
+
+        <TextView
+            android:id="@+id/mapping_6_textview"
+            style="?android:attr/spinnerItemStyle"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/_30sdp"
+            android:ellipsize="marquee"
+            android:gravity="center"
+            android:singleLine="true"
+            android:textAlignment="inherit"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toEndOf="@id/mapping_5_textview"
+            app:layout_constraintTop_toTopOf="@id/mapping_5_textview"
+            tools:text="HELLO" />
+
 
         <!-- ORIENTATION SECTION -->
+        <!-- CHANGED: Now constrained to mapping_5_textview instead of mapping_3_textview -->
         <TextView
             android:id="@+id/editOrientation_textView"
             android:layout_width="wrap_content"
@@ -248,7 +317,7 @@
             android:gravity="center"
             android:text="@string/customctrl_orientation"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/mapping_3_textview" />
+            app:layout_constraintTop_toBottomOf="@+id/mapping_5_textview" />
 
         <Spinner
             android:id="@+id/editOrientation_spinner"

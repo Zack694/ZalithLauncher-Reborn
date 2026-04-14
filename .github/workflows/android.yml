@@ -7,7 +7,8 @@ on:
 
 jobs:
   BuildRelease:
-    if: github.repository_owner == 'ZalithLauncher' && !startsWith(github.ref, 'refs/pull/') && github.ref_name == 'main'
+    # Removed the 'ZalithLauncher' owner check so it runs on your fork
+    if: !startsWith(github.ref, 'refs/pull/') && github.ref_name == 'main'
     runs-on: ubuntu-22.04
     strategy:
       matrix:
@@ -21,25 +22,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set build type
-        id: set-env
-        run: |
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
-          BUILD_TYPE="DEBUG"
-
-          if [[ "$COMMIT_MSG" == *"pre-release"* ]]; then
-            BUILD_TYPE="PRE_RELEASE"
-          elif [[ "$COMMIT_MSG" == *"release"* ]]; then
-            BUILD_TYPE="RELEASE"
-          fi
-
-          echo "ZL_BUILD_TYPE=${BUILD_TYPE}" >> $GITHUB_ENV
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
+
+      # NEW: Decodes your Base64 secret into the actual .jks file for signing
+      - name: Decode Keystore
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ZalithLauncher/release.jks
 
       - name: Build JRE JAR files
         run: |
@@ -49,10 +41,17 @@ jobs:
 
       - name: Build Release ${{ matrix.arch }}
         env:
+          # Using your secrets for the signing process
           MOVTERY_KEYSTORE_PASSWORD: ${{ secrets.MOVTERY_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_ALIAS }}
         run: |
           chmod +x gradlew
-          ./gradlew ZalithLauncher:assemblerelease -Darch=${{ matrix.arch }}
+          # We pass the signing info directly to Gradle here
+          ./gradlew ZalithLauncher:assemblerelease -Darch=${{ matrix.arch }} \
+            -Pandroid.injected.signing.store.file=release.jks \
+            -Pandroid.injected.signing.store.password=$MOVTERY_KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$MOVTERY_KEYSTORE_PASSWORD
 
       - name: Upload Release ${{matrix.arch}}
         continue-on-error: true
@@ -95,3 +94,4 @@ jobs:
         with:
           name: ZalithLauncher(Debug) ${{ matrix.arch }}
           path: ZalithLauncher/build/outputs/apk/debug/*
+          

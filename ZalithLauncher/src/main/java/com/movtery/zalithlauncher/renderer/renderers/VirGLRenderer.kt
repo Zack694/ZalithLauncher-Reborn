@@ -10,6 +10,8 @@ class VirGLRenderer : RendererInterface {
     override fun getUniqueIdentifier(): String = "a3ccc1fe-de3f-4a81-8c45-2485181b63b3"
 
     override fun getRendererName(): String = "VirGLRenderer"
+    override fun getRendererDescription(): String =
+        "Old renderer for old devices"
 
     override fun getRendererEnv(): Lazy<Map<String, String>> = lazy {
         mapOf(

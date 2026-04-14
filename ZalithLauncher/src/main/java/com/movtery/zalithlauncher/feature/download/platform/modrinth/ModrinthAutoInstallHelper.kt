@@ -9,6 +9,7 @@ import com.movtery.zalithlauncher.feature.download.item.InfoItem
 import com.movtery.zalithlauncher.feature.download.item.ModVersionItem
 import com.movtery.zalithlauncher.feature.download.item.ModrinthDependencyRef
 import com.movtery.zalithlauncher.feature.download.item.VersionItem
+import com.movtery.zalithlauncher.feature.download.utils.InstalledDependencyUtils
 import com.movtery.zalithlauncher.feature.download.utils.VersionTypeUtils
 import com.movtery.zalithlauncher.utils.ZHTools
 import net.kdt.pojavlaunch.modloaders.modpacks.api.ApiHandler
@@ -33,15 +34,22 @@ object ModrinthAutoInstallHelper {
         val rootVersion = version as? ModVersionItem
             ?: throw IllegalArgumentException("Modrinth auto install requires ModVersionItem")
 
-        val installPlan = resolveInstallPlan(api, infoItem, rootVersion)
+        val targetDir = if (targetPath.isDirectory) {
+            targetPath
+        } else {
+            targetPath.parentFile ?: targetPath
+        }
+
+        val installedIndex = InstalledDependencyUtils.buildInstalledIndex(targetDir)
+
+        val installPlan = resolveInstallPlan(
+            api = api,
+            rootInfoItem = infoItem,
+            rootVersion = rootVersion,
+            installedIndex = installedIndex
+        )
 
         for ((_, entry) in installPlan) {
-            val targetDir = if (targetPath.isDirectory) {
-                targetPath
-            } else {
-                targetPath.parentFile ?: targetPath
-            }
-
             val outputFile = File(targetDir, entry.versionItem.fileName)
             InstallHelper.downloadFile(entry.versionItem, outputFile, progressKey)
         }
@@ -51,7 +59,8 @@ object ModrinthAutoInstallHelper {
     private fun resolveInstallPlan(
         api: ApiHandler,
         rootInfoItem: InfoItem,
-        rootVersion: ModVersionItem
+        rootVersion: ModVersionItem,
+        installedIndex: InstalledDependencyUtils.InstalledIndex
     ): LinkedHashMap<String, ResolvedInstallEntry> {
         val resolved = LinkedHashMap<String, ResolvedInstallEntry>()
         val visited = LinkedHashSet<String>()
@@ -61,7 +70,9 @@ object ModrinthAutoInstallHelper {
             currentInfoItem = rootInfoItem,
             currentVersion = rootVersion,
             resolved = resolved,
-            visited = visited
+            visited = visited,
+            installedIndex = installedIndex,
+            isRoot = true
         )
 
         return resolved
@@ -73,14 +84,24 @@ object ModrinthAutoInstallHelper {
         currentInfoItem: InfoItem,
         currentVersion: ModVersionItem,
         resolved: LinkedHashMap<String, ResolvedInstallEntry>,
-        visited: LinkedHashSet<String>
+        visited: LinkedHashSet<String>,
+        installedIndex: InstalledDependencyUtils.InstalledIndex,
+        isRoot: Boolean
     ) {
         if (!visited.add(currentInfoItem.projectId)) return
 
-        resolved[currentInfoItem.projectId] = ResolvedInstallEntry(
-            infoItem = currentInfoItem,
-            versionItem = currentVersion
-        )
+        if (
+            isRoot || !InstalledDependencyUtils.isAlreadyInstalled(
+                installedIndex,
+                currentVersion.fileName,
+                currentVersion.fileHash
+            )
+        ) {
+            resolved[currentInfoItem.projectId] = ResolvedInstallEntry(
+                infoItem = currentInfoItem,
+                versionItem = currentVersion
+            )
+        }
 
         val requiredDependencies = currentVersion.dependencyRefs.filter {
             it.dependencyType == DependencyType.REQUIRED
@@ -100,12 +121,24 @@ object ModrinthAutoInstallHelper {
                 parentVersion = currentVersion
             ) ?: continue
 
+            if (
+                InstalledDependencyUtils.isAlreadyInstalled(
+                    installedIndex,
+                    dependencyVersion.fileName,
+                    dependencyVersion.fileHash
+                )
+            ) {
+                continue
+            }
+
             resolveRecursive(
                 api = api,
                 currentInfoItem = dependencyInfo,
                 currentVersion = dependencyVersion,
                 resolved = resolved,
-                visited = visited
+                visited = visited,
+                installedIndex = installedIndex,
+                isRoot = false
             )
         }
     }

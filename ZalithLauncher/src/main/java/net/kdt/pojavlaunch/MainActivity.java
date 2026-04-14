@@ -412,7 +412,6 @@ public class MainActivity extends BaseActivity implements
         CallbackBridge.nativeSetWindowAttrib(LwjglGlfwKeycode.GLFW_HOVERED, 0);
         super.onPause();
     }
-
     @Subscribe(threadMode = ThreadMode.MAIN)
     public void onJvmExit(JvmExitEvent event) {
         Logging.i("MainActivity", "JvmExitEvent received, exitCode=" + event.getExitCode());
@@ -421,35 +420,16 @@ public class MainActivity extends BaseActivity implements
         launchRequested.set(false);
         LaunchGame.resetLaunchState();
 
-        clearWindowAttribs();
-        cleanupRenderUiState();
-        cleanupGameService();
+        runOnUiThread(() -> {
+            GameService.setActive(false);
+            stopService(new Intent(this, GameService.class));
 
-        // Clean exit only:
-        // finish the activity and force-kill the stale :game process
-        // so 26.2+ can relaunch cleanly after Quit Game.
-        if (event.getExitCode() == 0) {
-            runOnUiThread(() -> {
-                if (!isFinishing()) {
-                    finish();
-                }
-            });
-
-            TaskExecutors.getUIHandler().postDelayed(() -> {
-                try {
-                    String processName = getCurrentProcessNameCompat();
-                    if (processName != null && processName.endsWith(":game")) {
-                        Logging.i("MainActivity", "JvmExitEvent: force killing :game process after clean exit");
-                        ZHTools.killProcess();
-                    }
-                } catch (Throwable t) {
-                    Logging.w("MainActivity", "Failed to force kill :game process after clean exit", t);
-                }
-            }, 150);
-        }
-
-        // Non-zero exit:
-        // leave the activity alive so the crash/error screen can remain visible.
+            if (AllSettings.getQuitLauncher().getValue()) {
+                ZHTools.killProcess();
+            } else {
+                finish();
+            }
+        });
     }
 
     private void clearWindowAttribs() {

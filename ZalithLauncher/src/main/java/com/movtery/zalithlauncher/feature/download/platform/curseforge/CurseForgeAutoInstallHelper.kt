@@ -10,13 +10,21 @@ import com.movtery.zalithlauncher.feature.download.item.ModVersionItem
 import com.movtery.zalithlauncher.feature.download.item.VersionItem
 import net.kdt.pojavlaunch.modloaders.modpacks.api.ApiHandler
 import java.io.File
+import java.io.FileInputStream
+import java.security.MessageDigest
 import java.util.LinkedHashMap
 import java.util.LinkedHashSet
+import java.util.Locale
 
 object CurseForgeAutoInstallHelper {
     private data class ResolvedInstallEntry(
         val infoItem: InfoItem,
         val versionItem: ModVersionItem
+    )
+
+    private data class InstalledIndex(
+        val fileNames: Set<String>,
+        val sha1Hashes: Set<String>
     )
 
     @Throws(Throwable::class)
@@ -30,15 +38,22 @@ object CurseForgeAutoInstallHelper {
         val rootVersion = version as? ModVersionItem
             ?: throw IllegalArgumentException("CurseForge auto install requires ModVersionItem")
 
-        val installPlan = resolveInstallPlan(api, infoItem, rootVersion)
+        val targetDir = if (targetPath.isDirectory) {
+            targetPath
+        } else {
+            targetPath.parentFile ?: targetPath
+        }
+
+        val installedIndex = buildInstalledIndex(targetDir)
+
+        val installPlan = resolveInstallPlan(
+            api = api,
+            rootInfoItem = infoItem,
+            rootVersion = rootVersion,
+            installedIndex = installedIndex
+        )
 
         for ((_, entry) in installPlan) {
-            val targetDir = if (targetPath.isDirectory) {
-                targetPath
-            } else {
-                targetPath.parentFile ?: targetPath
-            }
-
             val outputFile = File(targetDir, entry.versionItem.fileName)
             InstallHelper.downloadFile(entry.versionItem, outputFile, progressKey)
         }
@@ -48,7 +63,8 @@ object CurseForgeAutoInstallHelper {
     private fun resolveInstallPlan(
         api: ApiHandler,
         rootInfoItem: InfoItem,
-        rootVersion: ModVersionItem
+        rootVersion: ModVersionItem,
+        installedIndex: InstalledIndex
     ): LinkedHashMap<String, ResolvedInstallEntry> {
         val resolved = LinkedHashMap<String, ResolvedInstallEntry>()
         val visited = LinkedHashSet<String>()
@@ -58,7 +74,9 @@ object CurseForgeAutoInstallHelper {
             currentInfoItem = rootInfoItem,
             currentVersion = rootVersion,
             resolved = resolved,
-            visited = visited
+            visited = visited,
+            installedIndex = installedIndex,
+            isRoot = true
         )
 
         return resolved
@@ -70,14 +88,24 @@ object CurseForgeAutoInstallHelper {
         currentInfoItem: InfoItem,
         currentVersion: ModVersionItem,
         resolved: LinkedHashMap<String, ResolvedInstallEntry>,
-        visited: LinkedHashSet<String>
+        visited: LinkedHashSet<String>,
+        installedIndex: InstalledIndex,
+        isRoot: Boolean
     ) {
         if (!visited.add(currentInfoItem.projectId)) return
 
-        resolved[currentInfoItem.projectId] = ResolvedInstallEntry(
-            infoItem = currentInfoItem,
-            versionItem = currentVersion
-        )
+        if (
+            isRoot || !isAlreadyInstalled(
+                installedIndex,
+                currentVersion.fileName,
+                currentVersion.fileHash
+            )
+        ) {
+            resolved[currentInfoItem.projectId] = ResolvedInstallEntry(
+                infoItem = currentInfoItem,
+                versionItem = currentVersion
+            )
+        }
 
         val requiredDependencies = currentVersion.dependencies.filter {
             it.dependencyType == DependencyType.REQUIRED
@@ -91,12 +119,18 @@ object CurseForgeAutoInstallHelper {
                 parentVersion = currentVersion
             ) ?: continue
 
+            if (isAlreadyInstalled(installedIndex, dependencyVersion.fileName, dependencyVersion.fileHash)) {
+                continue
+            }
+
             resolveRecursive(
                 api = api,
                 currentInfoItem = dependencyInfo,
                 currentVersion = dependencyVersion,
                 resolved = resolved,
-                visited = visited
+                visited = visited,
+                installedIndex = installedIndex,
+                isRoot = false
             )
         }
     }
@@ -162,5 +196,71 @@ object CurseForgeAutoInstallHelper {
 
     private fun normalizeLoaders(loaders: List<ModLoader>): List<ModLoader> {
         return loaders.filter { it != ModLoader.ALL }
+    }
+
+    private fun buildInstalledIndex(modsDir: File): InstalledIndex {
+        if (!modsDir.exists() || !modsDir.isDirectory) {
+            return InstalledIndex(emptySet(), emptySet())
+        }
+
+        val fileNames = LinkedHashSet<String>()
+        val sha1Hashes = LinkedHashSet<String>()
+
+        modsDir.listFiles()
+            ?.filter { file ->
+                file.isFile && (
+                        file.name.endsWith(".jar", ignoreCase = true) ||
+                                file.name.endsWith(".jar.disabled", ignoreCase = true)
+                        )
+            }
+            ?.forEach { file ->
+                fileNames.add(normalizeFileName(file.name))
+
+                val sha1 = runCatching { computeSha1(file) }.getOrNull()
+                if (!sha1.isNullOrBlank()) {
+                    sha1Hashes.add(sha1.lowercase(Locale.ROOT))
+                }
+            }
+
+        return InstalledIndex(fileNames, sha1Hashes)
+    }
+
+    private fun isAlreadyInstalled(
+        index: InstalledIndex,
+        fileName: String?,
+        fileHash: String?
+    ): Boolean {
+        val normalizedName = normalizeFileName(fileName)
+        val normalizedHash = fileHash?.trim()?.lowercase(Locale.ROOT)
+
+        if (!normalizedHash.isNullOrBlank() && normalizedHash in index.sha1Hashes) {
+            return true
+        }
+
+        if (!normalizedName.isNullOrBlank() && normalizedName in index.fileNames) {
+            return true
+        }
+
+        return false
+    }
+
+    private fun normalizeFileName(fileName: String?): String {
+        return fileName.orEmpty()
+            .removeSuffix(".disabled")
+            .trim()
+            .lowercase(Locale.ROOT)
+    }
+
+    private fun computeSha1(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-1")
+        FileInputStream(file).use { input ->
+            val buffer = ByteArray(8192)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }

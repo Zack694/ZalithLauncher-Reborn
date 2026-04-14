@@ -1,14 +1,11 @@
 package com.movtery.zalithlauncher.feature.mod
 
 import android.content.Context
-import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.movtery.zalithlauncher.feature.download.enums.ModLoader
 import com.movtery.zalithlauncher.feature.download.platform.curseforge.CurseForgeCommonUtils
 import com.movtery.zalithlauncher.feature.download.utils.PlatformUtils
 import com.movtery.zalithlauncher.feature.log.Logging
-import net.kdt.pojavlaunch.modloaders.modpacks.api.ApiHandler
-import org.apache.commons.codec.digest.MurmurHash2
 import java.io.File
 import java.util.LinkedHashSet
 
@@ -76,7 +73,8 @@ object CurseForgeUpdateChecker {
         val latestCompatibleFile = findLatestCompatibleFile(
             modId = projectId,
             installedLoaders = modInfo.loaders,
-            minecraftVersion = minecraftVersion
+            minecraftVersion = minecraftVersion,
+            installedFileName = file.nameWithoutDisabledSuffix()
         ) ?: return unknownResult(
             installedVersion = modInfo.version,
             projectId = projectId,
@@ -127,30 +125,14 @@ object CurseForgeUpdateChecker {
         modId: String?,
         displayName: String?
     ): String? {
-        val fingerprint = runCatching { getCurseForgeFingerprint(file) }
-            .onFailure {
-                Logging.e("CurseForgeUpdateChecker", "Failed to fingerprint ${file.absolutePath}", it)
-            }
-            .getOrNull()
-
-        val fingerprintProjectId = fingerprint
-            ?.let { findExactFileMatch(it) }
-            ?.get("modId")
-            ?.asString
-
-        if (!fingerprintProjectId.isNullOrBlank()) {
-            return fingerprintProjectId
-        }
-
         val fallbackMatch = findProject(modId, displayName, file.name)
         if (fallbackMatch != null) {
             Logging.i(
                 "CurseForgeUpdateChecker",
-                "Using search fallback for ${file.name}, query=${fallbackMatch.query}, score=${fallbackMatch.score}"
+                "Using search match for ${file.name}, query=${fallbackMatch.query}, score=${fallbackMatch.score}"
             )
             return fallbackMatch.project.get("id")?.asString
         }
-
         return null
     }
 
@@ -191,29 +173,6 @@ object CurseForgeUpdateChecker {
             !latestVersion.isNullOrBlank() || !latestFileName.isNullOrBlank() -> UpdateStatus.UPDATE_AVAILABLE
             else -> UpdateStatus.UNKNOWN
         }
-    }
-
-    @Throws(Throwable::class)
-    private fun findExactFileMatch(fingerprint: Long): JsonObject? {
-        val body = JsonObject().apply {
-            val array = JsonArray()
-            array.add(fingerprint)
-            add("fingerprints", array)
-        }
-
-        val response = runCatching {
-            api.post("fingerprints/432", body, JsonObject::class.java)
-        }.onFailure {
-            Logging.e("CurseForgeUpdateChecker", "Failed fingerprint match lookup", it)
-        }.getOrNull() ?: return null
-
-        val exactMatches = response.getAsJsonObject("data")
-            ?.getAsJsonArray("exactMatches")
-            ?: return null
-
-        return exactMatches.firstOrNull()
-            ?.asJsonObject
-            ?.getAsJsonObject("file")
     }
 
     @Throws(Throwable::class)
@@ -261,8 +220,8 @@ object CurseForgeUpdateChecker {
     ): LinkedHashSet<String> {
         val queries = linkedSetOf<String>()
 
-        if (!modId.isNullOrBlank()) queries.add(modId)
-        if (!displayName.isNullOrBlank()) queries.add(displayName)
+        if (!modId.isNullOrBlank()) queries.add(modId.normalizeEncodedName())
+        if (!displayName.isNullOrBlank()) queries.add(displayName.normalizeEncodedName())
 
         fileName
             ?.nameWithoutJarSuffix()
@@ -276,6 +235,30 @@ object CurseForgeUpdateChecker {
             ?.let { queries.add(it) }
 
         return queries
+    }
+
+    private fun commonAliases(value: String): List<String> {
+        return when (normalizeSearchText(value)) {
+            "fabricapi" -> listOf("fabric api", "fabric-api", "fabricapi")
+            "placeholderapi" -> listOf("placeholder api", "placeholder-api", "placeholderapi")
+            "sodiumextra" -> listOf("sodium extra", "sodium-extra", "sodiumextra")
+            "yetanotherconfiglib", "yetanotherconfiglibv3" ->
+                listOf("yet another config lib", "yet-another-config-lib", "yacl", "yetanotherconfiglib")
+            "reesessodiumoptions" ->
+                listOf("reese's sodium options", "reeses sodium options", "reeses-sodium-options")
+            "moreculling" -> listOf("more culling", "more-culling")
+            else -> emptyList()
+        }
+    }
+
+    private fun String.removeLoaderSuffix(): String {
+        return this
+            .removeSuffix("-fabric")
+            .removeSuffix("-forge")
+            .removeSuffix("-neoforge")
+            .removeSuffix(" fabric")
+            .removeSuffix(" forge")
+            .removeSuffix(" neoforge")
     }
 
     private fun scoreHit(
@@ -316,11 +299,11 @@ object CurseForgeUpdateChecker {
         return score
     }
 
-    @Throws(Throwable::class)
     private fun findLatestCompatibleFile(
         modId: String,
         installedLoaders: List<ModLoader>,
-        minecraftVersion: String?
+        minecraftVersion: String?,
+        installedFileName: String? = null
     ): JsonObject? {
         val response = runCatching {
             api.get("mods/$modId/files", JsonObject::class.java)
@@ -334,25 +317,41 @@ object CurseForgeUpdateChecker {
 
         val preferredLoaders = normalizePreferredLoaders(installedLoaders)
 
-        val strictMatch = files
+        val exactMatches = files
             .filter { file ->
                 matchesLoader(file, preferredLoaders) &&
                         matchesMinecraftVersionExact(file, minecraftVersion)
             }
-            .maxByOrNull { file ->
+            .sortedByDescending { file ->
                 file.get("fileDate")?.asString ?: ""
             }
 
-        if (strictMatch != null) return strictMatch
+        if (exactMatches.isNotEmpty()) return exactMatches.first()
 
-        return files
+        val familyMatches = files
             .filter { file ->
                 matchesLoader(file, preferredLoaders) &&
                         matchesMinecraftVersionFamily(file, minecraftVersion)
             }
-            .maxByOrNull { file ->
-                file.get("fileDate")?.asString ?: ""
-            }
+
+        if (familyMatches.isEmpty()) return null
+
+        val installedBase = normalizeSearchText(installedFileName?.removeSuffix(".disabled")?.removeSuffix(".jar"))
+
+        return familyMatches.maxWithOrNull(
+            compareBy<JsonObject>(
+                { file ->
+                    val name = normalizeSearchText(file.get("fileName")?.asString)
+                    when {
+                        installedBase.isBlank() -> 0
+                        name == installedBase -> 4
+                        name.contains(installedBase) || installedBase.contains(name) -> 3
+                        else -> 1
+                    }
+                },
+                { file -> file.get("fileDate")?.asString ?: "" }
+            )
+        )
     }
 
     private fun matchesMinecraftVersionExact(file: JsonObject, minecraftVersion: String?): Boolean {
@@ -363,10 +362,8 @@ object CurseForgeUpdateChecker {
 
     private fun matchesMinecraftVersionFamily(file: JsonObject, minecraftVersion: String?): Boolean {
         if (minecraftVersion.isNullOrBlank()) return true
-
         val targetFamily = minecraftFamily(minecraftVersion)
         val versionsArray = file.getAsJsonArray("gameVersions") ?: return true
-
         return versionsArray.any { entry ->
             minecraftFamily(entry.asString) == targetFamily
         }
@@ -374,43 +371,33 @@ object CurseForgeUpdateChecker {
 
     private fun minecraftFamily(version: String): String {
         val parts = version.split(".")
-        return if (parts.size >= 2) {
-            parts[0] + "." + parts[1]
-        } else {
-            version
-        }
+        return if (parts.size >= 2) parts[0] + "." + parts[1] else version
     }
 
     private fun normalizePreferredLoaders(installedLoaders: List<ModLoader>): List<ModLoader> {
         val loaders = installedLoaders.filter { it != ModLoader.ALL }.toMutableList()
-        if (loaders.contains(ModLoader.FORGE) && !loaders.contains(ModLoader.NEOFORGE)) {
-            loaders.add(ModLoader.NEOFORGE)
-        }
-        if (loaders.contains(ModLoader.NEOFORGE) && !loaders.contains(ModLoader.FORGE)) {
-            loaders.add(ModLoader.FORGE)
-        }
+        if (loaders.contains(ModLoader.FORGE) && !loaders.contains(ModLoader.NEOFORGE)) loaders.add(ModLoader.NEOFORGE)
+        if (loaders.contains(ModLoader.NEOFORGE) && !loaders.contains(ModLoader.FORGE)) loaders.add(ModLoader.FORGE)
         return loaders.distinct()
     }
 
     private fun matchesLoader(file: JsonObject, preferredLoaders: List<ModLoader>): Boolean {
         if (preferredLoaders.isEmpty()) return true
-
         val gameVersions = file.getAsJsonArray("gameVersions") ?: return true
         val detectedLoaders = mutableSetOf<ModLoader>()
-
         gameVersions.forEach { element ->
             val value = element.asString
             ModLoader.values().firstOrNull { loader ->
                 loader != ModLoader.ALL && value.equals(loader.loaderName, ignoreCase = true)
             }?.let { detectedLoaders.add(it) }
         }
-
         if (detectedLoaders.isEmpty()) return true
         return detectedLoaders.any { it in preferredLoaders }
     }
 
     private fun normalizeSearchText(text: String?): String {
         return text.orEmpty()
+            .normalizeEncodedName()
             .trim()
             .lowercase()
             .replace(" ", "")
@@ -419,29 +406,31 @@ object CurseForgeUpdateChecker {
     }
 
     private fun normalizeVersion(version: String): String {
-        return version.trim()
+        return version
+            .normalizeEncodedName()
             .lowercase()
-            .replace(" ", "")
+            .replace(Regex("[^a-z0-9]+"), "")
     }
 
-    private fun File.nameWithoutDisabledSuffix(): String {
-        return name.removeDisabledSuffix()
-    }
+    private fun File.nameWithoutDisabledSuffix(): String = name.removeDisabledSuffix()
 
     private fun String.removeDisabledSuffix(): String {
-        return removeSuffix(".disabled")
+        return normalizeEncodedName().removeSuffix(".disabled")
     }
 
     private fun String.nameWithoutJarSuffix(): String {
-        return removeSuffix(".disabled").removeSuffix(".jar")
+        return normalizeEncodedName()
+            .removeSuffix(".disabled")
+            .removeSuffix(".jar")
     }
 
     private fun String.stripVersionTokens(): String {
         return replace(Regex("""[-_]\d+(\.\d+)+.*$"""), "")
     }
 
-    private fun getCurseForgeFingerprint(file: File): Long {
-        val bytes = file.readBytes()
-        return MurmurHash2.hash64(bytes, bytes.size, 1)
+    private fun String.normalizeEncodedName(): String {
+        return this
+            .replace("%2b", "+", ignoreCase = true)
+            .replace("%20", " ", ignoreCase = true)
     }
 }

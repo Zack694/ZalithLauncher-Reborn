@@ -4,6 +4,7 @@ import android.content.Context
 import com.movtery.zalithlauncher.feature.log.Logging
 import com.movtery.zalithlauncher.renderer.renderers.FreedrenoRenderer
 import com.movtery.zalithlauncher.renderer.renderers.GL4ESRenderer
+import com.movtery.zalithlauncher.renderer.renderers.KryptonRenderer
 import com.movtery.zalithlauncher.renderer.renderers.PanfrostRenderer
 import com.movtery.zalithlauncher.renderer.renderers.VirGLRenderer
 import com.movtery.zalithlauncher.renderer.renderers.VulkanZinkRenderer
@@ -32,6 +33,7 @@ object Renderers {
         }
 
         addRenderers(
+            KryptonRenderer(),
             GL4ESRenderer(),
             VulkanZinkRenderer(),
             VirGLRenderer(),

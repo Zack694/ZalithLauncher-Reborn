@@ -9,6 +9,8 @@ class FreedrenoRenderer : RendererInterface {
     override fun getUniqueIdentifier(): String = "1ad7249f-5784-4f00-bc72-174b3578ee46"
 
     override fun getRendererName(): String = "Freedreno (Adreno)"
+    override fun getRendererDescription(): String =
+        ""
 
     override fun getRendererEnv(): Lazy<Map<String, String>> = lazy { emptyMap() }
 

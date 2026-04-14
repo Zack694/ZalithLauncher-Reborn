@@ -75,7 +75,7 @@ class AllSettings {
         val mouseSpeed = IntSettingUnit("mousespeed", 100)
 
         @JvmStatic
-        val virtualMouseStart = BooleanSettingUnit("mouse_start", false)
+        val virtualMouseStart = BooleanSettingUnit("mouse_start", true)
 
         @JvmStatic
         val customMouse = StringSettingUnit("custom_mouse", "")

@@ -9,8 +9,7 @@ class NoticeJsonObject(
     val numbering: Int
 ) {
     class Text(
-        @SerializedName("zh_cn") val zhCN: String,
-        @SerializedName("zh_tw") val zhTW: String,
-        @SerializedName("en_us") val enUS: String
+        @SerializedName(value = "en_us", alternate = ["enUS"])
+        val enUS: String
     )
 }

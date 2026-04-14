@@ -7,7 +7,7 @@ on:
 
 jobs:
   BuildRelease:
-    # Quoted to prevent YAML syntax errors with the '!' character
+    # Quoted to prevent syntax errors and removed owner check for your fork
     if: "!startsWith(github.ref, 'refs/pull/') && github.ref_name == 'main'"
     runs-on: ubuntu-22.04
     strategy:
@@ -30,7 +30,8 @@ jobs:
 
       - name: Decode Keystore
         run: |
-          echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > ZalithLauncher/release.jks
+          # Decoding directly into the workspace root
+          echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > $GITHUB_WORKSPACE/release.jks
 
       - name: Build JRE JAR files
         run: |
@@ -44,8 +45,9 @@ jobs:
           KEY_ALIAS: ${{ secrets.RELEASE_ALIAS }}
         run: |
           chmod +x gradlew
+          # Using absolute path ($GITHUB_WORKSPACE) so Gradle finds the file 100%
           ./gradlew ZalithLauncher:assemblerelease -Darch=${{ matrix.arch }} \
-            -Pandroid.injected.signing.store.file=release.jks \
+            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/release.jks \
             -Pandroid.injected.signing.store.password=$MOVTERY_KEYSTORE_PASSWORD \
             -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
             -Pandroid.injected.signing.key.password=$MOVTERY_KEYSTORE_PASSWORD
@@ -91,4 +93,3 @@ jobs:
         with:
           name: ZalithLauncher(Debug) ${{ matrix.arch }}
           path: ZalithLauncher/build/outputs/apk/debug/*
-          

@@ -1,5 +1,6 @@
 package com.movtery.zalithlauncher.feature.download.platform.curseforge
 
+import android.content.Context
 import android.widget.Toast
 import com.movtery.zalithlauncher.R
 import com.movtery.zalithlauncher.context.ContextExecutor
@@ -16,25 +17,22 @@ import com.movtery.zalithlauncher.feature.download.platform.AbstractPlatformHelp
 import com.movtery.zalithlauncher.feature.download.platform.curseforge.CurseForgeCommonUtils.Companion.CURSEFORGE_MODPACK_CLASS_ID
 import com.movtery.zalithlauncher.feature.download.platform.curseforge.CurseForgeCommonUtils.Companion.CURSEFORGE_MOD_CLASS_ID
 import com.movtery.zalithlauncher.feature.download.utils.PlatformUtils
+import com.movtery.zalithlauncher.task.Task
 import java.io.File
 
 class CurseForgeHelper : AbstractPlatformHelper(PlatformUtils.createCurseForgeApi()) {
-    override fun copy(): AbstractPlatformHelper {
-        return CurseForgeHelper()
-    }
+    override fun copy(): AbstractPlatformHelper = CurseForgeHelper()
 
-    //更换为使用 slug 拼接链接
     override fun getWebUrl(infoItem: InfoItem): String? {
-        return "https://www.curseforge.com/minecraft/${
-            when (infoItem.classify) {
-                Classify.ALL -> return null
-                Classify.MOD -> "mc-mods"
-                Classify.MODPACK -> "modpacks"
-                Classify.RESOURCE_PACK -> "texture-packs"
-                Classify.WORLD -> "worlds"
-                Classify.SHADER_PACK -> "shaders"
-            }
-        }/${infoItem.slug}"
+        val section = when (infoItem.classify) {
+            Classify.ALL -> return null
+            Classify.MOD -> "mc-mods"
+            Classify.MODPACK -> "modpacks"
+            Classify.RESOURCE_PACK -> "texture-packs"
+            Classify.WORLD -> "worlds"
+            Classify.SHADER_PACK -> "shaders"
+        }
+        return "https://www.curseforge.com/minecraft/$section/${infoItem.slug}"
     }
 
     override fun getScreenshots(projectId: String): List<ScreenshotItem> {
@@ -92,9 +90,22 @@ class CurseForgeHelper : AbstractPlatformHelper(PlatformUtils.createCurseForgeAp
     }
 
     @Throws(Throwable::class)
-    override fun installMod(infoItem: InfoItem, version: VersionItem, targetPath: File, progressKey: String) {
-        com.movtery.zalithlauncher.task.Task.runTask {
-            CurseForgeAutoInstallHelper.installModWithDependencies(api, infoItem, version, targetPath, progressKey)
+    override fun installMod(
+        context: Context,
+        infoItem: InfoItem,
+        version: VersionItem,
+        targetPath: File,
+        progressKey: String
+    ) {
+        Task.runTask {
+            CurseForgeAutoInstallHelper.installModWithDependencies(
+                api,
+                infoItem,
+                version,
+                targetPath,
+                progressKey,
+                context
+            )
         }.execute()
     }
 
@@ -111,9 +122,9 @@ class CurseForgeHelper : AbstractPlatformHelper(PlatformUtils.createCurseForgeAp
     @Throws(Throwable::class)
     override fun installWorld(infoItem: InfoItem, version: VersionItem, targetPath: File, progressKey: String) {
         InstallHelper.downloadFile(version, targetPath, progressKey) { file ->
-            targetPath.parentFile?.let {
+            targetPath.parentFile?.let { parentDir ->
                 runCatching {
-                    UnpackWorldZipHelper.unpackFile(file, it)
+                    UnpackWorldZipHelper.unpackFile(file, parentDir)
                 }.getOrElse {
                     ContextExecutor.showToast(R.string.download_install_unpack_world_error, Toast.LENGTH_SHORT)
                 }

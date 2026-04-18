@@ -290,6 +290,9 @@
     <string name="profile_mods_enable">Enable</string>
     <string name="profile_mods_disable_or_enable">Disable/Enable</string>
     <!-- Account -->
+    <string name="account_login_failed">Login failed</string>
+    <string name="account_login_minecraft_auth_rejected">Login failed: Minecraft authentication was rejected.</string>
+    <string name="account_login_minecraft_profile_not_found">Minecraft profile not found.</string>
     <string name="account_login_done">Login Complete</string>
     <string name="account_add">Add Account</string>
     <string name="account_no_saved_accounts">No Saved Accounts</string>

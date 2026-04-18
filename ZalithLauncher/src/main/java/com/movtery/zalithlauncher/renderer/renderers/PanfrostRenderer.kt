@@ -8,6 +8,8 @@ class PanfrostRenderer : RendererInterface {
     override fun getUniqueIdentifier(): String = "9b2808c4-11af-4c72-a9c6-94c940396475"
 
     override fun getRendererName(): String = "Panfrost (Mali)"
+    override fun getRendererDescription(): String =
+        "Only used for certain Mali GPU devices that support Panfrost"
 
     override fun getRendererEnv(): Lazy<Map<String, String>> = lazy { emptyMap() }
 

@@ -1,5 +1,6 @@
 package com.movtery.zalithlauncher.feature.download.platform.modrinth
 
+import android.content.Context
 import com.movtery.zalithlauncher.feature.download.Filters
 import com.movtery.zalithlauncher.feature.download.enums.Classify
 import com.movtery.zalithlauncher.feature.download.install.InstallHelper
@@ -10,7 +11,6 @@ import com.movtery.zalithlauncher.feature.download.item.SearchResult
 import com.movtery.zalithlauncher.feature.download.item.VersionItem
 import com.movtery.zalithlauncher.feature.download.platform.AbstractPlatformHelper
 import com.movtery.zalithlauncher.feature.download.platform.PlatformNotSupportedException
-import com.movtery.zalithlauncher.feature.download.platform.curseforge.CurseForgeAutoInstallHelper
 import net.kdt.pojavlaunch.modloaders.modpacks.api.ApiHandler
 import java.io.File
 
@@ -53,7 +53,7 @@ class ModrinthHelper : AbstractPlatformHelper(ApiHandler("https://api.modrinth.c
 
     @Throws(Throwable::class)
     override fun searchWorld(filters: Filters, lastResult: SearchResult): SearchResult? {
-        throw PlatformNotSupportedException("Modrinth does not provide archive download support.") //Modrinth不提供MC存档
+        throw PlatformNotSupportedException("Modrinth does not provide archive download support.")
     }
 
     @Throws(Throwable::class)
@@ -78,7 +78,7 @@ class ModrinthHelper : AbstractPlatformHelper(ApiHandler("https://api.modrinth.c
 
     @Throws(Throwable::class)
     override fun getWorldVersions(infoItem: InfoItem, force: Boolean): List<VersionItem>? {
-        throw PlatformNotSupportedException("Modrinth does not provide archive download support.") //Modrinth不提供MC存档
+        throw PlatformNotSupportedException("Modrinth does not provide archive download support.")
     }
 
     @Throws(Throwable::class)
@@ -87,12 +87,24 @@ class ModrinthHelper : AbstractPlatformHelper(ApiHandler("https://api.modrinth.c
     }
 
     @Throws(Throwable::class)
-    override fun installMod(infoItem: InfoItem, version: VersionItem, targetPath: File, progressKey: String) {
+    override fun installMod(
+        context: Context,
+        infoItem: InfoItem,
+        version: VersionItem,
+        targetPath: File,
+        progressKey: String
+    ) {
         com.movtery.zalithlauncher.task.Task.runTask {
-            ModrinthAutoInstallHelper.installModWithDependencies(api, infoItem, version, targetPath, progressKey)
+            ModrinthAutoInstallHelper.installModWithDependencies(
+                api,
+                infoItem,
+                version,
+                targetPath,
+                progressKey,
+                context
+            )
         }.execute()
     }
-
 
     @Throws(Throwable::class)
     override fun installModPack(version: VersionItem, customName: String): ModLoaderWrapper? {

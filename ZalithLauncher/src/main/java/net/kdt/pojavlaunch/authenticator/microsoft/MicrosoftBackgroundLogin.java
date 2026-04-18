@@ -263,12 +263,19 @@ public class MicrosoftBackgroundLogin {
         conn.setRequestProperty("Authorization", "Bearer " + mcAccessToken);
         conn.setUseCaches(false);
         conn.connect();
-        if(conn.getResponseCode() < 200 || conn.getResponseCode() >= 300) {
-            throw getResponseThrowable(conn);
+
+        int code = conn.getResponseCode();
+        if (code < 200 || code >= 300) {
+            Logging.w("MicrosoftLogin", "mcstore check failed: " + code + " " + conn.getResponseMessage());
+            return;
         }
-        // We don't need any data from this request, it just needs to happen in order for
-        // the MS servers to work properly. The data from this is practically useless
-        // as it does not indicate whether the user owns the game through Game Pass.
+
+        try {
+            Tools.read(conn.getInputStream());
+        } catch (Throwable ignored) {
+        } finally {
+            conn.disconnect();
+        }
     }
 
     private void checkMcProfile(String mcAccessToken) throws IOException, JSONException {
@@ -279,26 +286,60 @@ public class MicrosoftBackgroundLogin {
         conn.setUseCaches(false);
         conn.connect();
 
-        if(conn.getResponseCode() >= 200 && conn.getResponseCode() < 300) {
-            String s= Tools.read(conn.getInputStream());
+        int code = conn.getResponseCode();
+
+        if (code >= 200 && code < 300) {
+            String s = Tools.read(conn.getInputStream());
             conn.disconnect();
+
             JSONObject jsonObject = new JSONObject(s);
-            String name = (String) jsonObject.get("name");
-            String uuid = (String) jsonObject.get("id");
+            String name = jsonObject.getString("name");
+            String uuid = jsonObject.getString("id");
             String uuidDashes = uuid.replaceFirst(
-                    "(\\p{XDigit}{8})(\\p{XDigit}{4})(\\p{XDigit}{4})(\\p{XDigit}{4})(\\p{XDigit}+)", "$1-$2-$3-$4-$5"
+                    "(\\p{XDigit}{8})(\\p{XDigit}{4})(\\p{XDigit}{4})(\\p{XDigit}{4})(\\p{XDigit}+)",
+                    "$1-$2-$3-$4-$5"
             );
+
             doesOwnGame = true;
-            Logging.i("MicrosoftLogin","UserName = " + name);
-            Logging.i("MicrosoftLogin","Uuid Minecraft = " + uuidDashes);
-            mcName=name;
-            mcUuid=uuidDashes;
-        }else{
-            Logging.i("MicrosoftLogin","It seems that this Microsoft Account does not own the game.");
-            doesOwnGame = false;
-            throw new PresentedException(new RuntimeException(conn.getResponseMessage()), R.string.minecraft_not_owned, true);
-            //throwResponseError(conn);
+            Logging.i("MicrosoftLogin", "UserName = " + name);
+            Logging.i("MicrosoftLogin", "Uuid Minecraft = " + uuidDashes);
+            mcName = name;
+            mcUuid = uuidDashes;
+            return;
         }
+
+        String errorBody = null;
+        try {
+            if (conn.getErrorStream() != null) {
+                errorBody = Tools.read(conn.getErrorStream());
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            conn.disconnect();
+        }
+
+        Logging.w("MicrosoftLogin", "Minecraft profile request failed: " + code + " " + conn.getResponseMessage()
+                + (errorBody != null ? " body=" + errorBody : ""));
+
+        doesOwnGame = false;
+
+        if (code == 404) {
+            throw new PresentedException(
+                    new RuntimeException("Minecraft profile not found"),
+                    R.string.minecraft_not_owned,
+                    true
+            );
+        }
+
+        if (code == 401 || code == 403) {
+            throw new PresentedException(
+                    new RuntimeException("Minecraft authentication rejected: " + conn.getResponseMessage()),
+                    R.string.account_login_failed,
+                    true
+            );
+        }
+
+        throw new RuntimeException(conn.getResponseMessage());
     }
 
     /** Wrapper to ease notifying the listener */

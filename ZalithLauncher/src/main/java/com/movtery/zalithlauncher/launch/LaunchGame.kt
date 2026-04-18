@@ -319,7 +319,7 @@ object LaunchGame {
         val versionInfo = Tools.getVersionInfo(minecraftVersion)
         val gameDirPath = minecraftVersion.getGameDir()
 
-        applyPreferredBackendIfNeeded(
+        applyGraphicsBackendOverrideIfNeeded(
             minecraftVersion = minecraftVersion,
             gameDir = gameDirPath
         )
@@ -380,33 +380,31 @@ object LaunchGame {
     }
 
     // OpenGL Check DNA Mobile
-    // OpenGL Check DNA Mobile
-    private fun applyPreferredBackendIfNeeded(
+    private fun applyGraphicsBackendOverrideIfNeeded(
         minecraftVersion: Version,
         gameDir: File
     ) {
         val versionName = minecraftVersion.getVersionName()
         if (!is26_2OrNewer(versionName)) return
 
-        val useOpenGL = AllSettings.useOpenGLForMinecraft26.getValue()
-        val useSystemVulkan = AllSettings.zinkPreferSystemDriver.getValue()
+        val forceOpenGL = AllSettings.useOpenGLForMinecraft26.getValue()
+        val forceSystemVulkan = AllSettings.zinkPreferSystemDriver.getValue()
 
         when {
-            useOpenGL -> {
-                Logger.appendToLog("GraphicsBackend: user enabled OpenGL for $versionName")
+            forceOpenGL -> {
+                Logger.appendToLog("GraphicsBackend: forcing OpenGL for $versionName")
                 patchOptionsGraphicsBackend(gameDir, GRAPHICS_BACKEND_OPENGL)
             }
 
-            useSystemVulkan -> {
-                Logger.appendToLog("GraphicsBackend: user enabled System Vulkan Driver for $versionName")
+            forceSystemVulkan -> {
+                Logger.appendToLog("GraphicsBackend: forcing System Vulkan Driver for $versionName")
                 patchOptionsGraphicsBackend(gameDir, GRAPHICS_BACKEND_VULKAN)
             }
 
             else -> {
                 Logger.appendToLog(
-                    "GraphicsBackend: no graphics API selected for $versionName, defaulting to OpenGL"
+                    "GraphicsBackend: no override selected for $versionName, using game's default backend"
                 )
-                patchOptionsGraphicsBackend(gameDir, GRAPHICS_BACKEND_OPENGL)
             }
         }
     }

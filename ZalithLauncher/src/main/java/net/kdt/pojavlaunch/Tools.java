@@ -846,16 +846,31 @@ public final class Tools {
         for (String key : keyArr) {
             Object value = null;
             try {
-                Field fieldA = fromVer.getClass().getDeclaredField(key);
+                Field fieldA = findField(fromVer.getClass(), key);
+                fieldA.setAccessible(true);
                 value = fieldA.get(fromVer);
-                if (((value instanceof String) && !((String) value).isEmpty()) || value != null) {
-                    Field fieldB = targetVer.getClass().getDeclaredField(key);
+
+                if (value != null && (!(value instanceof String) || !((String) value).isEmpty())) {
+                    Field fieldB = findField(targetVer.getClass(), key);
+                    fieldB.setAccessible(true);
                     fieldB.set(targetVer, value);
                 }
             } catch (Throwable th) {
                 Logging.w(InfoDistributor.LAUNCHER_NAME, "Unable to insert " + key + "=" + value, th);
             }
         }
+    }
+
+    private static Field findField(Class<?> clazz, String name) throws NoSuchFieldException {
+        Class<?> current = clazz;
+        while (current != null) {
+            try {
+                return current.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException("No field " + name + " in class hierarchy of " + clazz.getName());
     }
 
     public static String read(InputStream is) throws IOException {

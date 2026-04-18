@@ -9,6 +9,9 @@ class GL4ESRenderer : RendererInterface {
 
     override fun getRendererName(): String = "GL4ES"
 
+    override fun getRendererDescription(): String =
+        "Good for versions below 1.17"
+
     override fun getRendererEnv(): Lazy<Map<String, String>> = lazy { emptyMap() }
 
     override fun getDlopenLibrary(): Lazy<List<String>> = lazy { emptyList() }

@@ -9,11 +9,15 @@ plugins {
 }
 apply(plugin = "stringfog")
 val getCFApiKey = {
-    "change your key"
+    "\$2a\$10\$RrIlPprgFCiN5Xncl4jTAuIDUy0Gpp2tBDzKoxZunRNuxlgkouSGO"
 }
 
 val getBuildType = {
-    val buildType = System.getenv("ZL_BUILD_TYPE") ?: "DEBUG"
+    val buildType = if (gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }) {
+        "RELEASE"
+    } else {
+        "DEBUG"
+    }
     logger.warn("BUILD: Build Type --> $buildType")
     buildType
 }

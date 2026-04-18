@@ -113,6 +113,8 @@ object PluginLoader {
                     override fun getUniqueIdentifier(): String = rendererPlugin.uniqueIdentifier
 
                     override fun getRendererName(): String = rendererPlugin.displayName
+                    override fun getRendererDescription(): String =
+                        "Adreno Only"
 
                     override fun getRendererEnv(): Lazy<Map<String, String>> =
                         lazy { rendererPlugin.env }

@@ -11,6 +11,9 @@ interface RendererInterface {
     /** User-facing renderer name. */
     fun getRendererName(): String
 
+    /** User-facing renderer description. */
+    fun getRendererDescription(): String
+
     /** Environment variables required by this renderer. */
     fun getRendererEnv(): Lazy<Map<String, String>>
 

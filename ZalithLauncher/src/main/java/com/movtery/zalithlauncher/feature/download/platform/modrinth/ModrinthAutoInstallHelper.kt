@@ -1,5 +1,6 @@
 package com.movtery.zalithlauncher.feature.download.platform.modrinth
 
+import android.content.Context
 import com.google.gson.JsonObject
 import com.movtery.zalithlauncher.feature.download.enums.Classify
 import com.movtery.zalithlauncher.feature.download.enums.DependencyType
@@ -9,6 +10,7 @@ import com.movtery.zalithlauncher.feature.download.item.InfoItem
 import com.movtery.zalithlauncher.feature.download.item.ModVersionItem
 import com.movtery.zalithlauncher.feature.download.item.ModrinthDependencyRef
 import com.movtery.zalithlauncher.feature.download.item.VersionItem
+import com.movtery.zalithlauncher.feature.download.utils.InstalledDependencyUtils
 import com.movtery.zalithlauncher.feature.download.utils.VersionTypeUtils
 import com.movtery.zalithlauncher.utils.ZHTools
 import net.kdt.pojavlaunch.modloaders.modpacks.api.ApiHandler
@@ -28,22 +30,40 @@ object ModrinthAutoInstallHelper {
         infoItem: InfoItem,
         version: VersionItem,
         targetPath: File,
-        progressKey: String
+        progressKey: String,
+        context: Context
     ) {
         val rootVersion = version as? ModVersionItem
             ?: throw IllegalArgumentException("Modrinth auto install requires ModVersionItem")
 
-        val installPlan = resolveInstallPlan(api, infoItem, rootVersion)
+        val targetDir = if (targetPath.isDirectory) {
+            targetPath
+        } else {
+            targetPath.parentFile ?: targetPath
+        }
+
+        var installedIndex = context?.let {
+            InstalledDependencyUtils.buildInstalledIndex(it, targetDir)
+        }
+
+        val installPlan = resolveInstallPlan(
+            api = api,
+            rootInfoItem = infoItem,
+            rootVersion = rootVersion,
+            installedIndex = installedIndex
+        )
 
         for ((_, entry) in installPlan) {
-            val targetDir = if (targetPath.isDirectory) {
-                targetPath
-            } else {
-                targetPath.parentFile ?: targetPath
-            }
-
             val outputFile = File(targetDir, entry.versionItem.fileName)
-            InstallHelper.downloadFile(entry.versionItem, outputFile, progressKey)
+            InstallHelper.downloadFile(entry.versionItem, outputFile, progressKey) { downloadedFile ->
+                InstalledDependencyUtils.removeOldVersionsOfSameMod(
+                    context = context,
+                    modsDir = targetDir,
+                    downloadedFile = downloadedFile
+                )
+
+                installedIndex = InstalledDependencyUtils.buildInstalledIndex(context, targetDir)
+            }
         }
     }
 
@@ -51,7 +71,8 @@ object ModrinthAutoInstallHelper {
     private fun resolveInstallPlan(
         api: ApiHandler,
         rootInfoItem: InfoItem,
-        rootVersion: ModVersionItem
+        rootVersion: ModVersionItem,
+        installedIndex: InstalledDependencyUtils.InstalledIndex?
     ): LinkedHashMap<String, ResolvedInstallEntry> {
         val resolved = LinkedHashMap<String, ResolvedInstallEntry>()
         val visited = LinkedHashSet<String>()
@@ -61,7 +82,9 @@ object ModrinthAutoInstallHelper {
             currentInfoItem = rootInfoItem,
             currentVersion = rootVersion,
             resolved = resolved,
-            visited = visited
+            visited = visited,
+            installedIndex = installedIndex,
+            isRoot = true
         )
 
         return resolved
@@ -73,14 +96,25 @@ object ModrinthAutoInstallHelper {
         currentInfoItem: InfoItem,
         currentVersion: ModVersionItem,
         resolved: LinkedHashMap<String, ResolvedInstallEntry>,
-        visited: LinkedHashSet<String>
+        visited: LinkedHashSet<String>,
+        installedIndex: InstalledDependencyUtils.InstalledIndex?,
+        isRoot: Boolean
     ) {
         if (!visited.add(currentInfoItem.projectId)) return
 
-        resolved[currentInfoItem.projectId] = ResolvedInstallEntry(
-            infoItem = currentInfoItem,
-            versionItem = currentVersion
-        )
+        val alreadyInstalled = installedIndex != null &&
+                InstalledDependencyUtils.isAlreadyInstalled(
+                    installedIndex,
+                    currentVersion.fileName,
+                    currentVersion.fileHash
+                )
+
+        if (isRoot || !alreadyInstalled) {
+            resolved[currentInfoItem.projectId] = ResolvedInstallEntry(
+                infoItem = currentInfoItem,
+                versionItem = currentVersion
+            )
+        }
 
         val requiredDependencies = currentVersion.dependencyRefs.filter {
             it.dependencyType == DependencyType.REQUIRED
@@ -100,12 +134,25 @@ object ModrinthAutoInstallHelper {
                 parentVersion = currentVersion
             ) ?: continue
 
+            val dependencyAlreadyInstalled = installedIndex != null &&
+                    InstalledDependencyUtils.isAlreadyInstalled(
+                        installedIndex,
+                        dependencyVersion.fileName,
+                        dependencyVersion.fileHash
+                    )
+
+            if (dependencyAlreadyInstalled) {
+                continue
+            }
+
             resolveRecursive(
                 api = api,
                 currentInfoItem = dependencyInfo,
                 currentVersion = dependencyVersion,
                 resolved = resolved,
-                visited = visited
+                visited = visited,
+                installedIndex = installedIndex,
+                isRoot = false
             )
         }
     }
@@ -119,7 +166,10 @@ object ModrinthAutoInstallHelper {
     ): ModVersionItem? {
         dependencyRef.versionId?.let { exactVersionId ->
             val exactVersion = getVersionById(api, exactVersionId)
-            if (exactVersion != null && matchesParentMc(exactVersion, parentVersion) && matchesParentLoader(exactVersion, parentVersion)) {
+            if (exactVersion != null &&
+                matchesParentMc(exactVersion, parentVersion) &&
+                matchesParentLoader(exactVersion, parentVersion)
+            ) {
                 return exactVersion
             }
         }

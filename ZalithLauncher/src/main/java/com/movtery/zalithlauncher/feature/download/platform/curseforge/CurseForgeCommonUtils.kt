@@ -24,7 +24,6 @@ import net.kdt.pojavlaunch.modloaders.modpacks.api.ApiHandler
 import net.kdt.pojavlaunch.utils.GsonJsonUtils
 import java.io.IOException
 import java.util.TreeSet
-import java.util.function.Consumer
 
 class CurseForgeCommonUtils {
     companion object {
@@ -41,46 +40,58 @@ class CurseForgeCommonUtils {
             params["sortField"] = filters.sort.curseforge
             params["sortOrder"] = "desc"
             params["pageSize"] = CURSEFORGE_SEARCH_COUNT
-            filters.category.curseforgeID?.let { if (filters.category != Category.ALL) params["categoryId"] = it }
-            filters.mcVersion?.let { if (it.isNotEmpty()) params["gameVersion"] = it }
+            filters.category.curseforgeID?.let {
+                if (filters.category != Category.ALL) params["categoryId"] = it
+            }
+            filters.mcVersion?.takeIf { it.isNotEmpty() }?.let {
+                params["gameVersion"] = it
+            }
             params["index"] = index
         }
 
         internal fun getAllCategories(hit: JsonObject): Set<Category> {
             val list: MutableSet<Category> = TreeSet()
-            for (categories in hit["categories"].asJsonArray) {
-                val id = categories.asJsonObject["id"].asString
-                CategoryUtils.getCategoryByCurseForge(id)?.let { list.add(it) }
+            val categories = GsonJsonUtils.getJsonArraySafe(hit, "categories") ?: return list
+
+            for (categoryElement in categories) {
+                val id = GsonJsonUtils.getStringSafe(categoryElement.asJsonObject, "id") ?: continue
+                CategoryUtils.getCategoryByCurseForge(id)?.let(list::add)
             }
             return list
         }
 
         internal fun getIconUrl(hit: JsonObject): String? {
             return runCatching {
-                hit.getAsJsonObject("logo").get("thumbnailUrl").asString
+                hit.getAsJsonObject("logo")?.get("thumbnailUrl")?.asString
             }.getOrNull()
         }
 
         internal fun getScreenshots(api: ApiHandler, projectId: String): List<ScreenshotItem> {
-            searchModFromID(api, projectId)?.let { jsonObject ->
-                val hit = jsonObject.getAsJsonObject("data")
-                val screenshotItems: MutableList<ScreenshotItem> = ArrayList()
-                hit.getAsJsonArray("screenshots").forEach { element ->
-                    val screenshotObject = element.asJsonObject
-                    screenshotItems.add(
-                        ScreenshotItem(
-                            screenshotObject.get("url").asString,
-                            StringUtilsKt.getNonEmptyOrBlank(screenshotObject.get("title").asString),
-                            StringUtilsKt.getNonEmptyOrBlank(screenshotObject.get("description").asString),
-                        )
+            val hit = GsonJsonUtils.getJsonObjectSafe(searchModFromID(api, projectId), "data") ?: return emptyList()
+            val screenshots = GsonJsonUtils.getJsonArraySafe(hit, "screenshots") ?: return emptyList()
+
+            val screenshotItems = ArrayList<ScreenshotItem>(screenshots.size())
+            for (element in screenshots) {
+                val screenshotObject = GsonJsonUtils.getJsonObjectSafe(element) ?: continue
+                val url = GsonJsonUtils.getStringSafe(screenshotObject, "url") ?: continue
+                screenshotItems.add(
+                    ScreenshotItem(
+                        url,
+                        StringUtilsKt.getNonEmptyOrBlank(GsonJsonUtils.getStringSafe(screenshotObject, "title")),
+                        StringUtilsKt.getNonEmptyOrBlank(GsonJsonUtils.getStringSafe(screenshotObject, "description")),
                     )
-                }
-                return screenshotItems
+                )
             }
-            return emptyList()
+            return screenshotItems
         }
 
-        internal fun getResults(api: ApiHandler, lastResult: SearchResult, filters: Filters, classId: Int, classify: Classify): SearchResult? {
+        internal fun getResults(
+            api: ApiHandler,
+            lastResult: SearchResult,
+            filters: Filters,
+            classId: Int,
+            classify: Classify
+        ): SearchResult? {
             if (filters.category != Category.ALL && filters.category.curseforgeID == null) {
                 throw PlatformNotSupportedException("The platform does not support the ${filters.category} category!")
             }
@@ -90,14 +101,12 @@ class CurseForgeCommonUtils {
             params["classId"] = classId
 
             val response = api.get("mods/search", params, JsonObject::class.java) ?: return null
-            val dataArray = response.getAsJsonArray("data") ?: return null
+            val dataArray = GsonJsonUtils.getJsonArraySafe(response, "data") ?: return null
 
-            val infoItems: MutableList<InfoItem> = ArrayList()
+            val infoItems: MutableList<InfoItem> = ArrayList(dataArray.size())
             for (data in dataArray) {
-                val dataElement = data.asJsonObject
-                getInfoItem(dataElement, classify)?.let { item ->
-                    infoItems.add(item)
-                }
+                val dataElement = GsonJsonUtils.getJsonObjectSafe(data) ?: continue
+                getInfoItem(dataElement, classify)?.let(infoItems::add)
             }
 
             return returnResults(lastResult, infoItems, dataArray, response)
@@ -105,23 +114,32 @@ class CurseForgeCommonUtils {
 
         internal fun getInfoItem(dataObject: JsonObject, classify: Classify): InfoItem? {
             val allowModDistribution = dataObject.get("allowModDistribution")
-            // Gson automatically casts null to false, which leans to issues
-            // So, only check the distribution flag if it is non-null
-            if (!allowModDistribution.isJsonNull && !allowModDistribution.asBoolean) {
-                Logging.i("CurseForgeCommonUtils", "Skipping project ${dataObject["name"].asString} because curseforge sucks")
+            if (allowModDistribution != null && !allowModDistribution.isJsonNull && !allowModDistribution.asBoolean) {
+                Logging.i(
+                    "CurseForgeCommonUtils",
+                    "Skipping project ${GsonJsonUtils.getStringSafe(dataObject, "name")} because distribution is disabled"
+                )
                 return null
             }
+
+            val id = GsonJsonUtils.getStringSafe(dataObject, "id") ?: return null
+            val slug = GsonJsonUtils.getStringSafe(dataObject, "slug") ?: return null
+            val authors = GsonJsonUtils.getJsonArraySafe(dataObject, "authors") ?: return null
+            val name = GsonJsonUtils.getStringSafe(dataObject, "name") ?: return null
+            val summary = GsonJsonUtils.getStringSafe(dataObject, "summary") ?: ""
+            val downloadCount = dataObject.get("downloadCount")?.asLong ?: 0L
+            val dateCreated = GsonJsonUtils.getStringSafe(dataObject, "dateCreated") ?: return null
 
             return InfoItem(
                 classify,
                 Platform.CURSEFORGE,
-                dataObject.get("id").asString,
-                dataObject.get("slug").asString,
-                getAuthors(dataObject.get("authors").asJsonArray).toTypedArray(),
-                dataObject.get("name").asString,
-                dataObject.get("summary").asString,
-                dataObject.get("downloadCount").asLong,
-                ZHTools.getDate(dataObject.get("dateCreated").asString),
+                id,
+                slug,
+                getAuthors(authors).toTypedArray(),
+                name,
+                summary,
+                downloadCount,
+                ZHTools.getDate(dateCreated),
                 getIconUrl(dataObject),
                 getAllCategories(dataObject).toList(),
             )
@@ -129,55 +147,48 @@ class CurseForgeCommonUtils {
 
         @Throws(Throwable::class)
         internal fun getVersions(api: ApiHandler, infoItem: InfoItem, force: Boolean): List<VersionItem>? {
-            if (!force && InfoCache.VersionCache.containsKey(infoItem.projectId)) return InfoCache.VersionCache.get(infoItem.projectId)
+            if (!force && InfoCache.VersionCache.containsKey(infoItem.projectId)) {
+                return InfoCache.VersionCache.get(infoItem.projectId)
+            }
 
             val allData = getPaginatedData(api, infoItem.projectId)
+            val versionsItem: MutableList<VersionItem> = ArrayList(allData.size)
 
-            val versionsItem: MutableList<VersionItem> = ArrayList()
             for (data in allData) {
                 try {
-                    //获取版本信息
-                    val mcVersions: MutableSet<String> = TreeSet()
-                    for (gameVersionElement in data.getAsJsonArray("gameVersions")) {
-                        val gameVersion = gameVersionElement.asString
-                        mcVersions.add(gameVersion)
-                    }
-                    //过滤非MC版本的元素
-                    val releaseRegex = RELEASE_REGEX
-                    val nonMCVersion: MutableSet<String> = TreeSet()
-                    mcVersions.forEach(Consumer { string: String ->
-                        if (!releaseRegex.matcher(string).find()) nonMCVersion.add(string)
-                    })
-                    if (nonMCVersion.isNotEmpty()) mcVersions.removeAll(nonMCVersion)
+                    val fileName = GsonJsonUtils.getStringSafe(data, "fileName") ?: continue
+                    val displayName = GsonJsonUtils.getStringSafe(data, "displayName") ?: fileName
+                    val fileDate = GsonJsonUtils.getStringSafe(data, "fileDate") ?: continue
+                    val downloadUrl = resolveDownloadUrl(api, data) ?: continue
 
                     versionsItem.add(
                         VersionItem(
                             infoItem.projectId,
-                            data.get("displayName").asString,
-                            data.get("downloadCount").asLong,
-                            ZHTools.getDate(data.get("fileDate").asString),
-                            mcVersions.toList(),
-                            VersionTypeUtils.getVersionType(data.get("releaseType").asString),
-                            data.get("fileName").asString,
+                            displayName,
+                            data.get("downloadCount")?.asLong ?: 0L,
+                            ZHTools.getDate(fileDate),
+                            extractMinecraftVersions(data),
+                            VersionTypeUtils.getVersionType(GsonJsonUtils.getStringSafe(data, "releaseType") ?: "1"),
+                            fileName,
                             getSha1FromData(data),
-                            data.get("downloadUrl").asString
+                            downloadUrl
                         )
                     )
                 } catch (e: Exception) {
                     Logging.e("CurseForgeHelper", Tools.printToString(e))
-                    continue
                 }
             }
 
+            versionsItem.sortByDescending { it.uploadDate.time }
             InfoCache.VersionCache.put(infoItem.projectId, versionsItem)
             return versionsItem
         }
 
         internal fun getAuthors(array: JsonArray): List<String> {
-            val authors: MutableList<String> = ArrayList()
+            val authors: MutableList<String> = ArrayList(array.size())
             for (authorElement in array) {
-                val authorObject = authorElement.asJsonObject
-                authors.add(authorObject.get("name").asString)
+                val authorObject = GsonJsonUtils.getJsonObjectSafe(authorElement) ?: continue
+                GsonJsonUtils.getStringSafe(authorObject, "name")?.let(authors::add)
             }
             return authors
         }
@@ -185,48 +196,68 @@ class CurseForgeCommonUtils {
         internal fun getSha1FromData(jsonObject: JsonObject): String? {
             val hashes = GsonJsonUtils.getJsonArraySafe(jsonObject, "hashes") ?: return null
             for (jsonElement in hashes) {
-                // The sha1 = 1; md5 = 2;
-                val jsonObject1 = GsonJsonUtils.getJsonObjectSafe(jsonElement)
-                if (GsonJsonUtils.getIntSafe(jsonObject1, "algo", -1) == ALGO_SHA_1) {
-                    return GsonJsonUtils.getStringSafe(jsonObject1, "value")
+                val hashObject = GsonJsonUtils.getJsonObjectSafe(jsonElement) ?: continue
+                if (GsonJsonUtils.getIntSafe(hashObject, "algo", -1) == ALGO_SHA_1) {
+                    return GsonJsonUtils.getStringSafe(hashObject, "value")
                 }
             }
             return null
         }
 
         internal fun getDownloadUrl(api: ApiHandler, projectID: Long, fileID: Long): String? {
-            // First try the official api endpoint
             val response = api.safeRun { get("mods/$projectID/files/$fileID/download-url", JsonObject::class.java) }
-            if (response != null && !response["data"].isJsonNull) return response["data"].asString
+            val direct = GsonJsonUtils.getStringSafe(response, "data")
+            if (!direct.isNullOrBlank()) return direct
 
-            // Otherwise, fallback to building an edge link
             val fallbackResponse = api.safeRun { get("mods/$projectID/files/$fileID", JsonObject::class.java) }
-            if (fallbackResponse != null && !fallbackResponse["data"].isJsonNull) {
-                val modData = fallbackResponse["data"].asJsonObject
-                val id = modData["id"].asInt
-                return "https://edge.forgecdn.net/files/${id / 1000}/${id % 1000}/${modData["fileName"].asString}"
-            }
+            val modData = GsonJsonUtils.getJsonObjectSafe(fallbackResponse, "data") ?: return null
+            val id = GsonJsonUtils.getIntSafe(modData, "id", -1)
+            val fileName = GsonJsonUtils.getStringSafe(modData, "fileName") ?: return null
+            if (id <= 0) return null
 
-            return null
+            return "https://edge.forgecdn.net/files/${id / 1000}/${id % 1000}/$fileName"
         }
 
         internal fun getDownloadSha1(api: ApiHandler, projectID: Long, fileID: Long): String? {
-            // Try the api endpoint, die in the other case
             val response = api.safeRun { get("mods/$projectID/files/$fileID", JsonObject::class.java) }
             val data = GsonJsonUtils.getJsonObjectSafe(response, "data") ?: return null
             return getSha1FromData(data)
         }
 
         internal fun searchModFromID(api: ApiHandler, id: String): JsonObject? {
-            return api.safeRun { get("mods/$id", JsonObject::class.java) }?.also {
-                Logging.i("CurseForge_searchModFromID", it.toString())
+            return api.safeRun { get("mods/$id", JsonObject::class.java) }
+        }
+
+        internal fun resolveDownloadUrl(api: ApiHandler, fileData: JsonObject): String? {
+            val directUrl = GsonJsonUtils.getStringSafe(fileData, "downloadUrl")
+            if (!directUrl.isNullOrBlank()) return directUrl
+
+            val projectId = GsonJsonUtils.getIntSafe(fileData, "modId", -1).toLong()
+            val fileId = GsonJsonUtils.getIntSafe(fileData, "id", -1).toLong()
+            if (projectId <= 0L || fileId <= 0L) return null
+
+            return getDownloadUrl(api, projectId, fileId)
+        }
+
+        internal fun extractMinecraftVersions(fileData: JsonObject): List<String> {
+            val versions: MutableSet<String> = TreeSet()
+            val rawVersions = GsonJsonUtils.getJsonArraySafe(fileData, "gameVersions") ?: return emptyList()
+
+            for (gameVersionElement in rawVersions) {
+                val gameVersion = gameVersionElement.asString
+                if (RELEASE_REGEX.matcher(gameVersion).find()) {
+                    versions.add(gameVersion)
+                }
             }
+
+            return versions.toList()
         }
 
         @Throws(IOException::class)
         internal fun getPaginatedData(api: ApiHandler, projectId: String): List<JsonObject> {
             val dataList: MutableList<JsonObject> = ArrayList()
             var index = 0
+
             while (index != -1) {
                 val params = HashMap<String, Any>()
                 params["index"] = index
@@ -237,14 +268,12 @@ class CurseForgeCommonUtils {
 
                 for (i in 0 until data.size()) {
                     val fileInfo = data[i].asJsonObject
-                    if (fileInfo["isServerPack"].asBoolean) continue
+                    val isServerPack = fileInfo.get("isServerPack")?.takeUnless { it.isJsonNull }?.asBoolean ?: false
+                    if (isServerPack) continue
                     dataList.add(fileInfo)
                 }
-                if (data.size() < CURSEFORGE_PAGINATION_SIZE) {
-                    index = -1
-                    continue
-                }
-                index += CURSEFORGE_PAGINATION_SIZE
+
+                index = if (data.size() < CURSEFORGE_PAGINATION_SIZE) -1 else index + CURSEFORGE_PAGINATION_SIZE
             }
 
             return dataList

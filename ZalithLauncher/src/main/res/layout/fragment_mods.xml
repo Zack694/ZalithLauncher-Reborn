@@ -116,7 +116,18 @@
                     app:layout_constraintBottom_toBottomOf="parent"
                     app:layout_constraintEnd_toStartOf="@id/show_updates_only"
                     app:layout_constraintTop_toTopOf="parent">
-
+                    <ImageView
+                        android:id="@+id/modrinth_update_info_button"
+                        android:layout_width="@dimen/_16sdp"
+                        android:layout_height="@dimen/_16sdp"
+                        android:layout_marginEnd="@dimen/_10sdp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:clickable="true"
+                        android:contentDescription="Modrinth update info"
+                        android:focusable="true"
+                        android:padding="@dimen/_2sdp"
+                        android:src="@android:drawable/ic_dialog_info"
+                        app:tint="@color/primary_text" />
                     <ImageView
                         android:id="@+id/modrinth_icon"
                         android:layout_width="@dimen/_18sdp"
@@ -129,7 +140,7 @@
                         android:id="@+id/check_updates_modrinth_button"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="@dimen/_10sdp"
+                        android:layout_marginEnd="@dimen/_6sdp"
                         android:background="@drawable/button_background"
                         android:gravity="center"
                         android:minWidth="@dimen/_82sdp"
@@ -141,6 +152,8 @@
                         android:textSize="@dimen/_10sdp"
                         android:textStyle="bold"
                         app:ripple_for_text="true" />
+
+
 
                     <ImageView
                         android:id="@+id/curseforge_icon"
@@ -164,6 +177,23 @@
                         android:textColor="@color/primary_text"
                         android:textSize="@dimen/_10sdp"
                         android:textStyle="bold"
+                        app:ripple_for_text="true" />
+                    <com.movtery.zalithlauncher.ui.view.AnimTextView
+                        android:id="@+id/update_all_button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/_10sdp"
+                        android:background="@drawable/button_background"
+                        android:gravity="center"
+                        android:minWidth="@dimen/_82sdp"
+                        android:minHeight="@dimen/_32sdp"
+                        android:paddingHorizontal="@dimen/_12sdp"
+                        android:paddingVertical="@dimen/_6sdp"
+                        android:text="Update All"
+                        android:textColor="@color/primary_text"
+                        android:textSize="@dimen/_10sdp"
+                        android:textStyle="bold"
+                        android:visibility="gone"
                         app:ripple_for_text="true" />
 
                 </LinearLayout>

@@ -63,10 +63,16 @@ abstract class AbstractPlatformHelper(val api: ApiHandler) {
                     val mod = ModTranslations.getTranslationsByRepositoryType(infoItem.classify)
                         .getModByCurseForgeId(infoItem.slug)
                     customPath(
-                        context, version, getModsPath(), infoItem.title,
-                        translatedName = mod?.name, taskRunning = isTaskRunning, install = { targetPath, progressKey ->
-                        installMod(infoItem, version, targetPath, progressKey)
-                    })
+                        context,
+                        version,
+                        getModsPath(),
+                        infoItem.title,
+                        translatedName = mod?.name,
+                        taskRunning = isTaskRunning,
+                        install = { targetPath, progressKey ->
+                            installMod(context, infoItem, version, targetPath, progressKey)
+                        }
+                    )
                 }
                 Classify.MODPACK -> {
                     EditTextDialog.Builder(context)
@@ -210,7 +216,13 @@ abstract class AbstractPlatformHelper(val api: ApiHandler) {
     abstract fun getWorldVersions(infoItem: InfoItem, force: Boolean): List<VersionItem>?
     abstract fun getShaderPackVersions(infoItem: InfoItem, force: Boolean): List<VersionItem>?
 
-    abstract fun installMod(infoItem: InfoItem, version: VersionItem, targetPath: File, progressKey: String)
+    abstract fun installMod(
+        context: Context,
+        infoItem: InfoItem,
+        version: VersionItem,
+        targetPath: File,
+        progressKey: String
+    )
     abstract fun installModPack(version: VersionItem, customName: String): ModLoaderWrapper?
     abstract fun installResourcePack(infoItem: InfoItem, version: VersionItem, targetPath: File, progressKey: String)
     abstract fun installWorld(infoItem: InfoItem, version: VersionItem, targetPath: File, progressKey: String)

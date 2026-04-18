@@ -65,6 +65,7 @@ import com.movtery.zalithlauncher.feature.version.install.InstallTask;
 import com.movtery.zalithlauncher.plugins.PluginLoader;
 import com.movtery.zalithlauncher.plugins.renderer.RendererPlugin;
 import com.movtery.zalithlauncher.plugins.renderer.RendererPluginManager;
+import com.movtery.zalithlauncher.renderer.RendererInterface;
 import com.movtery.zalithlauncher.renderer.Renderers;
 import com.movtery.zalithlauncher.setting.AllSettings;
 import com.movtery.zalithlauncher.task.Task;
@@ -111,6 +112,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Random;
 import java.util.concurrent.Future;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class LauncherActivity extends BaseActivity {
 
@@ -118,6 +121,13 @@ public class LauncherActivity extends BaseActivity {
     private static final String FALLBACK_COMPATIBLE_RENDERER_NAME = "a compatible renderer";
     private static final String MOBILE_GLUES_URL =
             "https://github.com/MobileGL-Dev/MobileGlues-release/releases";
+    private static final String VULKAN_ZINK_RENDERER_ID = "vulkan_zink";
+    private static final String VULKAN_ZINK_RENDERER_NAME = "Vulkan Zink";
+    private static final String VULKAN_ZINK_RENDERER_UUID = "0fa435e2-46df-45c9-906c-b29606aaef00";
+    private static final Pattern LEGACY_RELEASE_VERSION_PATTERN =
+            Pattern.compile("^1\\.(\\d+)(?:\\.(\\d+))?$");
+    private static final Pattern MODERN_RELEASE_VERSION_PATTERN =
+            Pattern.compile("^(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?.*$");
 
     private final AnimPlayer noticeAnimPlayer = new AnimPlayer();
 
@@ -197,8 +207,9 @@ public class LauncherActivity extends BaseActivity {
             return;
         }
 
+        String rendererValue = getEffectiveRendererValue(version);
         RendererPlugin rendererPlugin =
-                RendererPluginManager.getConfigurablePluginOrNull(version.getRenderer());
+                RendererPluginManager.getConfigurablePluginOrNull(rendererValue);
 
         if (rendererPlugin != null) {
             StoragePermissionsUtils.ensurePermissions(
@@ -483,8 +494,7 @@ public class LauncherActivity extends BaseActivity {
                         return;
                     }
 
-                    Runnable runnable =
-                            Tools.getWeakReference(requestNotificationPermissionRunnable);
+                    Runnable runnable = Tools.getWeakReference(requestNotificationPermissionRunnable);
                     if (runnable != null) {
                         runnable.run();
                     }
@@ -686,128 +696,194 @@ public class LauncherActivity extends BaseActivity {
     }
 
     private void continueLaunchIfModernRendererReady(Version version) {
-        // This checks if the user has a compatible renderer installed for specific versions
         PluginLoader.refreshAllPlugins(this);
-        Renderers.reloadRenderers(this, version.getRenderer(), false);
+        Renderers.reloadRenderers(this, getEffectiveRendererValue(version), false);
 
         if (!checkModernRendererRequirement(version)) {
             return;
         }
 
         preLaunch(LauncherActivity.this, version);
-        PluginLoader.refreshAllPlugins(this);
-        Renderers.reloadRenderers(this, version.getRenderer(), false);
-        preLaunch(LauncherActivity.this, version);
     }
+
     private boolean checkModernRendererRequirement(Version version) {
-        JMinecraftVersionList.Version versionInfo;
-        boolean requiresModernRenderer;
+        boolean is117OrNewer = isVersionAtLeast17(version);
+
+        Logger.appendToLog(
+                "Modern renderer gate [LauncherActivity]: versionRenderer="
+                        + version.getRenderer()
+                        + " settingsRenderer=" + AllSettings.getRenderer().getValue()
+                        + " effectiveRenderer=" + getEffectiveRendererValue(version)
+                        + " is117OrNewer=" + is117OrNewer
+        );
+
+        if (!is117OrNewer) {
+            return true;
+        }
+
+        if (isAllowedRendererSelectedFor117Plus(version)) {
+            Logger.appendToLog(
+                    "Modern renderer gate [LauncherActivity]: allowed 1.17+ renderer selected"
+            );
+            return true;
+        }
+
+        if (hasAllowedRendererAvailableFor117Plus()) {
+            showModernRendererSelectionDialog();
+        } else {
+            showModernRendererInstallDialog();
+        }
+        return false;
+    }
+    private boolean isVersionAtLeast17(Version version) {
+        for (String candidate : buildVersionCandidates(version)) {
+            Boolean parsed = parseIsVersionAtLeast17(candidate);
+            if (parsed != null) {
+                Logger.appendToLog(
+                        "Modern renderer gate [LauncherActivity]: parsed version candidate '"
+                                + candidate + "' => is117OrNewer=" + parsed
+                );
+                return parsed;
+            }
+        }
+
+        Logger.appendToLog(
+                "Modern renderer gate [LauncherActivity]: unable to confidently parse version, treating as below 1.17"
+        );
+        return false;
+    }
+
+    private String[] buildVersionCandidates(Version version) {
+        java.util.List<String> candidates = new java.util.ArrayList<>();
+
+        if (version != null) {
+            try {
+                JMinecraftVersionList.Version versionInfo = Tools.getVersionInfo(version);
+                if (versionInfo != null && versionInfo.id != null && !versionInfo.id.trim().isEmpty()) {
+                    candidates.add(versionInfo.id.trim());
+                }
+            } catch (Throwable ignored) {
+            }
+
+            String versionName = version.getVersionName();
+            if (versionName != null && !versionName.trim().isEmpty()) {
+                candidates.add(versionName.trim());
+            }
+        }
+
+        return candidates.toArray(new String[0]);
+    }
+
+
+
+    private Boolean parseIsVersionAtLeast17(String rawValue) {
+        String normalized = safeTrim(rawValue);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+
+        Matcher legacyExactMatcher = LEGACY_RELEASE_VERSION_PATTERN.matcher(normalized);
+        if (legacyExactMatcher.matches()) {
+            return evaluateLegacyIsVersionAtLeast17(legacyExactMatcher.group(1));
+        }
+
+        Matcher modernExactMatcher = MODERN_RELEASE_VERSION_PATTERN.matcher(normalized);
+        if (modernExactMatcher.matches()) {
+            return evaluateModernIsVersionAtLeast17(modernExactMatcher.group(1));
+        }
+
+        Matcher legacyEmbeddedMatcher =
+                Pattern.compile("(^|[^0-9])1\\.(\\d+)(?:\\.(\\d+))?([^0-9]|$)").matcher(normalized);
+        if (legacyEmbeddedMatcher.find()) {
+            return evaluateLegacyIsVersionAtLeast17(legacyEmbeddedMatcher.group(2));
+        }
+
+        Matcher modernEmbeddedMatcher =
+                Pattern.compile("(^|[^0-9])(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?([^0-9]|$)").matcher(normalized);
+        if (modernEmbeddedMatcher.find()) {
+            return evaluateModernIsVersionAtLeast17(modernEmbeddedMatcher.group(2));
+        }
+
+        return null;
+    }
+
+    private boolean evaluateLegacyIsVersionAtLeast17(String minorGroup) {
+        try {
+            return Integer.parseInt(minorGroup) >= 17;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private boolean evaluateModernIsVersionAtLeast17(String majorGroup) {
+        try {
+            return Integer.parseInt(majorGroup) >= 17;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private String getEffectiveRendererValue(Version version) {
+        if (version != null) {
+            String versionRenderer = version.getRenderer();
+            if (versionRenderer != null && !versionRenderer.trim().isEmpty()) {
+                return versionRenderer.trim();
+            }
+        }
+
+        String settingsRenderer = AllSettings.getRenderer().getValue();
+        if (settingsRenderer != null && !settingsRenderer.trim().isEmpty()) {
+            return settingsRenderer.trim();
+        }
+
+        return "";
+    }
+
+    private boolean isAllowedRendererSelectedFor117Plus(Version version) {
+        String rendererValue = getEffectiveRendererValue(version);
+        if (rendererValue.isEmpty()) {
+            return false;
+        }
+
+        if (matchesAllowed117PlusRendererValue(rendererValue)) {
+            return true;
+        }
 
         try {
-            versionInfo = Tools.getVersionInfo(version);
-            requiresModernRenderer = requiresModernRenderer(versionInfo);
+            if (Renderers.INSTANCE.isCurrentRendererValid()) {
+                RendererInterface currentRenderer = Renderers.INSTANCE.getCurrentRenderer();
+                if (matchesBuiltInRenderer(currentRenderer, rendererValue)) {
+                    return isAllowedBuiltInRendererFor117Plus(currentRenderer);
+                }
+            }
         } catch (Throwable t) {
             Logger.appendToLog(
-                    "Modern renderer gate [LauncherActivity]: failed to resolve version info for "
-                            + version.getVersionName()
-                            + ", allowing launch to continue. Error: " + t
+                    "Modern renderer gate [LauncherActivity]: failed to inspect current built-in renderer: " + t
             );
-            Logging.e(TAG, "Failed to resolve version info for renderer gate", t);
-            return true;
         }
 
-        Logger.appendToLog(
-                "Modern renderer gate [LauncherActivity]: version.id="
-                        + (versionInfo != null ? versionInfo.id : "null")
-                        + " requires=" + requiresModernRenderer
-        );
-
-        if (!requiresModernRenderer) {
-            return true;
-        }
-
-        boolean hasSupportedRendererInstalled = hasSupportedModernRendererAvailable();
-        boolean supportedRendererSelectedForVersion = isSupportedModernRendererSelectedForVersion(version);
-
-        Logger.appendToLog(
-                "Modern renderer gate [LauncherActivity]: available="
-                        + hasSupportedRendererInstalled
-                        + " selectedForVersion=" + supportedRendererSelectedForVersion
-                        + " versionRenderer=" + version.getRenderer()
-        );
-
-        if (!hasSupportedRendererInstalled) {
-            showModernRendererInstallDialog();
-            return false;
-        }
-
-        if (!supportedRendererSelectedForVersion) {
-            showModernRendererSelectionDialog();
-            return false;
-        }
-
-        return true;
-    }
-
-    private boolean requiresModernRenderer(JMinecraftVersionList.Version versionInfo) {
-        if (versionInfo == null || versionInfo.id == null) {
-            return true;
-        }
-
-        String rawVersion = versionInfo.id.trim();
-        java.util.regex.Matcher matcher =
-                java.util.regex.Pattern.compile("^1\\.(\\d+)(?:\\.(\\d+))?$").matcher(rawVersion);
-
-        if (!matcher.matches()) {
-            return true;
-        }
-
-        int minor;
-        int patch;
-
-        try {
-            minor = Integer.parseInt(matcher.group(1));
-            String patchGroup = matcher.group(2);
-            patch = patchGroup != null ? Integer.parseInt(patchGroup) : 0;
-        } catch (NumberFormatException e) {
-            return true;
-        }
-
-        if (minor < 16) {
-            return false;
-        }
-
-        if (minor > 16) {
-            return true;
-        }
-
-        return patch > 5;
-    }
-
-    private boolean isSupportedModernRendererPlugin(RendererPlugin rendererPlugin) {
-        String displayName = rendererPlugin.getDisplayName() != null
-                ? rendererPlugin.getDisplayName().toLowerCase()
-                : "";
-
-        String uniqueIdentifier = rendererPlugin.getUniqueIdentifier() != null
-                ? rendererPlugin.getUniqueIdentifier().toLowerCase()
-                : "";
-
-        return displayName.contains("mobile glues")
-                || displayName.contains("ltw")
-                || displayName.contains("krypton")
-                || displayName.contains("vulkan zink")
-                || uniqueIdentifier.contains("mobileglues")
-                || uniqueIdentifier.contains("ltw")
-                || uniqueIdentifier.contains("krypton")
-                || uniqueIdentifier.contains("vulkan_zink")
-                || uniqueIdentifier.contains("vulkan-zink")
-                || uniqueIdentifier.contains("zink");
-    }
-
-    private boolean hasSupportedModernRendererAvailable() {
         for (RendererPlugin rendererPlugin : RendererPluginManager.getRendererList()) {
-            if (isSupportedModernRendererPlugin(rendererPlugin)) {
+            if (rendererPlugin == null) {
+                continue;
+            }
+
+            if (!matchesRendererPlugin(rendererPlugin, rendererValue)) {
+                continue;
+            }
+
+            return isAllowedPluginRendererFor117Plus(rendererPlugin);
+        }
+
+        return false;
+    }
+
+    private boolean hasAllowedRendererAvailableFor117Plus() {
+        if (hasCompatibleVulkanZinkBuiltIn()) {
+            return true;
+        }
+
+        for (RendererPlugin rendererPlugin : RendererPluginManager.getRendererList()) {
+            if (isAllowedPluginRendererFor117Plus(rendererPlugin)) {
                 return true;
             }
         }
@@ -815,46 +891,114 @@ public class LauncherActivity extends BaseActivity {
         return false;
     }
 
-    private boolean isSupportedModernRendererSelectedForVersion(Version version) {
-        String rendererUniqueIdentifier = version.getRenderer();
-        if (rendererUniqueIdentifier == null || rendererUniqueIdentifier.trim().isEmpty()) {
+    private boolean matchesAllowed117PlusRendererValue(String rendererValue) {
+        String lower = safeLower(rendererValue);
+
+        return lower.contains("mobile glues")
+                || lower.contains("mobileglues")
+                || lower.contains("mobile_glues")
+                || lower.contains("ltw")
+                || lower.contains("krypton")
+                || VULKAN_ZINK_RENDERER_UUID.equalsIgnoreCase(rendererValue)
+                || lower.contains("vulkan_zink")
+                || lower.contains("vulkan-zink")
+                || lower.contains("vulkan zink");
+    }
+
+    private boolean matchesBuiltInRenderer(RendererInterface renderer, String rendererValue) {
+        if (renderer == null || rendererValue == null || rendererValue.isEmpty()) {
             return false;
         }
 
-        String rendererLower = rendererUniqueIdentifier.toLowerCase();
-
-        if (rendererLower.contains("vulkan_zink")
-                || rendererLower.contains("vulkan-zink")
-                || rendererLower.contains("zink")) {
-            return true;
-        }
-
-        for (RendererPlugin rendererPlugin : RendererPluginManager.getRendererList()) {
-            if (!rendererUniqueIdentifier.equals(rendererPlugin.getUniqueIdentifier())) {
-                continue;
-            }
-
-            return isSupportedModernRendererPlugin(rendererPlugin);
-        }
-
-        return false;
+        return rendererValue.equals(renderer.getUniqueIdentifier())
+                || rendererValue.equals(renderer.getRendererId())
+                || rendererValue.equals(renderer.getRendererName());
     }
 
-    private String getInstalledSupportedRendererName() {
-        for (RendererPlugin rendererPlugin : RendererPluginManager.getRendererList()) {
-            if (isSupportedModernRendererPlugin(rendererPlugin)) {
-                return rendererPlugin.getDisplayName();
-            }
+    private boolean isAllowedBuiltInRendererFor117Plus(RendererInterface renderer) {
+        if (renderer == null) {
+            return false;
         }
 
-        return FALLBACK_COMPATIBLE_RENDERER_NAME;
+        String rendererId = safeLower(renderer.getRendererId());
+        String rendererName = safeLower(renderer.getRendererName());
+        String uniqueIdentifier = safeLower(renderer.getUniqueIdentifier());
+
+        return rendererName.contains("mobile glues")
+                || uniqueIdentifier.contains("mobileglues")
+                || uniqueIdentifier.contains("mobile_glues")
+                || rendererId.contains("ltw")
+                || rendererName.contains("ltw")
+                || uniqueIdentifier.contains("ltw")
+                || rendererId.contains("krypton")
+                || rendererName.contains("krypton")
+                || uniqueIdentifier.contains("krypton")
+                || rendererId.contains("vulkan_zink")
+                || rendererId.contains("zink")
+                || rendererName.contains("vulkan zink")
+                || VULKAN_ZINK_RENDERER_UUID.equalsIgnoreCase(renderer.getUniqueIdentifier());
+    }
+
+    private boolean isAllowedPluginRendererFor117Plus(RendererPlugin rendererPlugin) {
+        if (rendererPlugin == null) {
+            return false;
+        }
+
+        String displayName = safeLower(rendererPlugin.getDisplayName());
+        String uniqueIdentifier = safeLower(rendererPlugin.getUniqueIdentifier());
+        String pluginId = safeLower(getRendererPluginId(rendererPlugin));
+
+        return displayName.contains("mobile glues")
+                || uniqueIdentifier.contains("mobileglues")
+                || uniqueIdentifier.contains("mobile_glues")
+                || pluginId.contains("mobileglues")
+                || pluginId.contains("mobile_glues")
+                || displayName.contains("ltw")
+                || uniqueIdentifier.contains("ltw")
+                || pluginId.contains("ltw")
+                || displayName.contains("krypton")
+                || uniqueIdentifier.contains("krypton")
+                || pluginId.contains("krypton")
+                || displayName.contains("vulkan zink")
+                || uniqueIdentifier.contains("vulkan_zink")
+                || uniqueIdentifier.contains("vulkan-zink")
+                || VULKAN_ZINK_RENDERER_UUID.equalsIgnoreCase(rendererPlugin.getUniqueIdentifier())
+                || pluginId.contains("vulkan_zink")
+                || pluginId.contains("vulkan-zink")
+                || pluginId.contains("zink");
+    }
+
+    private boolean hasCompatibleVulkanZinkBuiltIn() {
+        return Tools.checkVulkanSupport(getPackageManager())
+                && !(Architecture.is32BitsDevice() && Architecture.isx86Device());
+    }
+
+    private boolean matchesRendererPlugin(RendererPlugin rendererPlugin, String rendererValue) {
+        if (rendererPlugin == null || rendererValue == null || rendererValue.isEmpty()) {
+            return false;
+        }
+
+        return rendererValue.equals(rendererPlugin.getUniqueIdentifier())
+                || rendererValue.equals(rendererPlugin.getDisplayName())
+                || rendererValue.equals(getRendererPluginId(rendererPlugin));
+    }
+
+    private String getRendererPluginId(RendererPlugin rendererPlugin) {
+        try {
+            return rendererPlugin.getId();
+        } catch (Throwable ignored) {
+            return "";
+        }
     }
 
     private void showModernRendererInstallDialog() {
         String message =
-                "This Minecraft version needs a compatible modern renderer before launch.\n\n"
-                        + "No compatible renderer was detected in the renderer list.\n\n"
-                        + "Supported examples include LTW, Mobile Glues, Vulkan Zink, and Krypton.\\n\\n"
+                "Minecraft 1.17 and newer needs one of these renderers before launch:\n\n"
+                        + "• Mobile Glues\n"
+                        + "• LTW\n"
+                        + "• Krypton\n"
+                        + "• Vulkan Zink\n\n"
+                        + "No compatible renderer was detected.\n\n"
                         + "Recommended download:\n"
                         + MOBILE_GLUES_URL;
 
@@ -876,13 +1020,14 @@ public class LauncherActivity extends BaseActivity {
     }
 
     private void showModernRendererSelectionDialog() {
-        String rendererName = getInstalledSupportedRendererName();
         String message =
-                "You already have a compatible renderer installed for this version"
-                        + (FALLBACK_COMPATIBLE_RENDERER_NAME.equals(rendererName) ? "" : " (" + rendererName + ")")
-                        + ".\n\n"
-                        + "It is not selected for this version yet.\n\n"
-                        + "Open Settings > Video Settings > Renderer, then select the compatible renderer before launching.";
+                "Minecraft 1.17 and newer requires one of these renderers:\n\n"
+                        + "• Mobile Glues\n"
+                        + "• LTW\n"
+                        + "• Krypton\n"
+                        + "• Vulkan Zink\n\n"
+                        + "A compatible renderer appears to be installed, but it is not selected for this version.\n\n"
+                        + "Open Settings > Video Settings > Renderer, then select a compatible renderer before launching.";
 
         new TipDialog.Builder(this)
                 .setTitle(R.string.generic_warning)
@@ -892,6 +1037,14 @@ public class LauncherActivity extends BaseActivity {
                 .setCenterMessage(false)
                 .setSelectable(true)
                 .showDialog();
+    }
+
+    private String safeTrim(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private String safeLower(String value) {
+        return safeTrim(value).toLowerCase();
     }
 
     private void checkNotice() {

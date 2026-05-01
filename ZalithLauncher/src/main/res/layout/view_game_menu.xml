@@ -420,7 +420,7 @@
                         android:layout_centerVertical="true"
                         android:layout_toEndOf="@id/mouse_speed_remove"
                         android:layout_toStartOf="@id/mouse_speed_add"
-                        android:max="300"
+                        android:max="1000"
                         android:min="25"/>
 
                     <TextView

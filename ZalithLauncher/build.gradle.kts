@@ -22,7 +22,7 @@ val getBuildType = {
     buildType
 }
 
-val nameId = "com.movtery.zalithlauncher"
+val nameId = "com.unstable.launcher"
 val generatedZalithDir = file("$buildDir/generated/source/zalith/java")
 val launcherAPPName = project.findProperty("launcher_app_name") as? String ?: error("The \"launcher_app_name\" property is not set in gradle.properties.")
 val launcherName = project.findProperty("launcher_name") as? String ?: error("The \"launcher_name\" property is not set in gradle.properties.")
@@ -49,10 +49,10 @@ android {
 
     signingConfigs {
         create("releaseBuild") {
-            val pwd = System.getenv("MOVTERY_KEYSTORE_PASSWORD")
-            storeFile = file("movtery-key.jks")
+            val pwd = System.getenv("UNSTABLE_KEYSTORE_PASSWORD")
+            storeFile = file("unstable-launcher.jks")
             storePassword = pwd
-            keyAlias = "mtp"
+            keyAlias = "unstable"
             keyPassword = pwd
         }
         create("customDebug") {
@@ -221,6 +221,10 @@ tasks.register("generateInfoDistributor") {
 
 tasks.named("preBuild") {
     dependsOn("generateInfoDistributor")
+}
+
+tasks.named("build") {
+    dependsOn("assembleRelease")
 }
 
 dependencies {

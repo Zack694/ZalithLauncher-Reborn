@@ -203,7 +203,7 @@
                     android:layout_alignBottom="@+id/timeLongPressTrigger_value"
                     android:layout_alignParentStart="true"
                     android:layout_toStartOf="@id/timeLongPressTrigger_value"
-                    android:max="1000"
+                    android:max="300"
                     android:min="100" />
 
                 <TextView
@@ -423,7 +423,7 @@
                     android:layout_alignBottom="@+id/mousespeed_value"
                     android:layout_alignParentStart="true"
                     android:layout_toStartOf="@id/mousespeed_value"
-                    android:max="300"
+                    android:max="1000"
                     android:min="25" />
 
                 <TextView

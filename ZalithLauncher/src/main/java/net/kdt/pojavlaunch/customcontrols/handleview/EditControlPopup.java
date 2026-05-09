@@ -74,9 +74,9 @@ public class EditControlPopup {
             internalChanges = false;
         }
     };
-    protected EditText mNameEditText, mWidthEditText, mHeightEditText;
+    protected EditText mNameEditText, mWidthEditText, mHeightEditText, mMinCpsEditText, mMaxCpsEditText;
     @SuppressLint("UseSwitchCompatOrMaterialCode")
-    protected Switch mToggleSwitch, mPassthroughSwitch, mSwipeableSwitch, mForwardLockSwitch, mAbsoluteTrackingSwitch;
+    protected Switch mToggleSwitch, mPassthroughSwitch, mSwipeableSwitch, mForwardLockSwitch, mAbsoluteTrackingSwitch, mClickerSwitch;
     protected Spinner mOrientationSpinner;
     protected TextView[] mKeycodeTextviews = new TextView[6]; // CHANGED: 4 -> 6
     protected SeekBar mStrokeWidthSeekbar, mCornerRadiusSeekbar, mAlphaSeekbar;
@@ -91,7 +91,7 @@ public class EditControlPopup {
     private ControlInterface mCurrentlyEditedButton;
     // Decorative textviews
     private TextView mOrientationTextView, mMappingTextView, mNameTextView,
-            mCornerRadiusTextView, mVisibilityTextView, mSizeTextview, mSizeXTextView;
+            mCornerRadiusTextView, mVisibilityTextView, mSizeTextview, mSizeXTextView, mMinCpsTextView, mMaxCpsTextView;
 
 
     public EditControlPopup(Context context, ViewGroup parent) {
@@ -293,8 +293,12 @@ public class EditControlPopup {
         setPercentageText(mCornerRadiusPercentTextView, (int) data.cornerRadius);
 
         mToggleSwitch.setChecked(data.isToggle);
+        mClickerSwitch.setChecked(data.isClicker);
         mPassthroughSwitch.setChecked(data.passThruEnabled);
         mSwipeableSwitch.setChecked(data.isSwipeable);
+        mMinCpsEditText.setText(String.valueOf(data.minCps));
+        mMaxCpsEditText.setText(String.valueOf(data.maxCps));
+        updateClickerUiState();
 
         mDisplayInGameCheckbox.setChecked(data.displayInGame);
         mDisplayInMenuCheckbox.setChecked(data.displayInMenu);
@@ -394,6 +398,9 @@ public class EditControlPopup {
         mSwipeableSwitch = mScrollView.findViewById(R.id.checkboxSwipeable);
         mForwardLockSwitch = mScrollView.findViewById(R.id.checkboxForwardLock);
         mAbsoluteTrackingSwitch = mScrollView.findViewById(R.id.checkboxAbsoluteFingerTracking);
+        mClickerSwitch = mScrollView.findViewById(R.id.checkboxClicker);
+        mMinCpsEditText = mScrollView.findViewById(R.id.editMinCps);
+        mMaxCpsEditText = mScrollView.findViewById(R.id.editMaxCps);
 
         // CHANGED: Added spinner 5 and 6
         mKeycodeSpinners[0] = mScrollView.findViewById(R.id.editMapping_spinner_1);
@@ -431,6 +438,8 @@ public class EditControlPopup {
         mVisibilityTextView = mScrollView.findViewById(R.id.visibility_textview);
         mSizeTextview = mScrollView.findViewById(R.id.editSize_textView);
         mSizeXTextView = mScrollView.findViewById(R.id.editSize_x_textView);
+        mMinCpsTextView = mScrollView.findViewById(R.id.editMinCps_textView);
+        mMaxCpsTextView = mScrollView.findViewById(R.id.editMaxCps_textView);
 
         keyboardDialog = new KeyboardDialog(this.context);
     }
@@ -489,6 +498,15 @@ public class EditControlPopup {
         mPassthroughSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (internalChanges) return;
             mCurrentlyEditedButton.getProperties().passThruEnabled = isChecked;
+        });
+        mClickerSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (internalChanges) return;
+            ControlData data = mCurrentlyEditedButton.getProperties();
+            data.isClicker = isChecked;
+            if (isChecked) {
+                data.keycodes[0] = data.clickerButton;
+            }
+            updateClickerUiState();
         });
         mForwardLockSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (internalChanges) return;
@@ -604,6 +622,14 @@ public class EditControlPopup {
             if (internalChanges) return;
             mCurrentlyEditedButton.getProperties().displayInMenu = isChecked;
         });
+        mMinCpsEditText.addTextChangedListener((SimpleTextWatcher) s -> {
+            if (internalChanges) return;
+            mCurrentlyEditedButton.getProperties().minCps = Math.max(1, safeParseInt(s.toString(), 1));
+        });
+        mMaxCpsEditText.addTextChangedListener((SimpleTextWatcher) s -> {
+            if (internalChanges) return;
+            mCurrentlyEditedButton.getProperties().maxCps = Math.max(1, safeParseInt(s.toString(), 1));
+        });
 
         mSelectStrokeColor.setOnClickListener(v -> {
             mColorSelector.setAlphaEnabled(false);
@@ -636,12 +662,32 @@ public class EditControlPopup {
             return; // Skip if index is out of bounds (old 4-binding controls)
         }
 
+        if (mCurrentlyEditedButton.getProperties().isClicker && finalI == 0) {
+            int selectedSpecial = mKeycodeSpinners[finalI].getSelectedItemPosition() - mSpecialArray.size();
+            if (selectedSpecial != ControlData.SPECIALBTN_MOUSEPRI && selectedSpecial != ControlData.SPECIALBTN_MOUSESEC) {
+                int leftSelection = mSpecialArray.size() + ControlData.SPECIALBTN_MOUSEPRI;
+                mKeycodeSpinners[finalI].setSelection(leftSelection);
+            }
+        }
+
         if (index < mSpecialArray.size()) {
             mCurrentlyEditedButton.getProperties().keycodes[finalI] = mKeycodeSpinners[finalI].getSelectedItemPosition() - mSpecialArray.size();
+            if (finalI == 0 && (mCurrentlyEditedButton.getProperties().keycodes[finalI] == ControlData.SPECIALBTN_MOUSEPRI
+                    || mCurrentlyEditedButton.getProperties().keycodes[finalI] == ControlData.SPECIALBTN_MOUSESEC)) {
+                mCurrentlyEditedButton.getProperties().clickerButton = mCurrentlyEditedButton.getProperties().keycodes[finalI];
+            }
         } else {
             mCurrentlyEditedButton.getProperties().keycodes[finalI] = EfficientAndroidLWJGLKeycode.getValueByIndex(mKeycodeSpinners[finalI].getSelectedItemPosition() - mSpecialArray.size());
         }
         mKeycodeTextviews[finalI].setText((String) mKeycodeSpinners[finalI].getSelectedItem());
+    }
+
+    private void updateClickerUiState() {
+        int visibility = mCurrentlyEditedButton.getProperties().isClicker ? VISIBLE : GONE;
+        mMinCpsTextView.setVisibility(visibility);
+        mMaxCpsTextView.setVisibility(visibility);
+        mMinCpsEditText.setVisibility(visibility);
+        mMaxCpsEditText.setVisibility(visibility);
     }
 
     private float safeParseFloat(String string) {
@@ -652,6 +698,15 @@ public class EditControlPopup {
             Logging.e("EditControlPopup", e.toString());
         }
         return out;
+    }
+
+    private int safeParseInt(String text, int fallback) {
+        try {
+            return Integer.parseInt(text);
+        } catch (NumberFormatException e) {
+            Logging.e("EditControlPopup", e.toString());
+            return fallback;
+        }
     }
 
     public void setCurrentlyEditedButton(ControlInterface button) {

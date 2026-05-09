@@ -8,6 +8,8 @@ import android.annotation.SuppressLint;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -25,6 +27,8 @@ import net.kdt.pojavlaunch.customcontrols.handleview.EditControlPopup;
 
 import org.lwjgl.glfw.CallbackBridge;
 
+import java.util.concurrent.ThreadLocalRandom;
+
 @SuppressLint({"ViewConstructor", "AppCompatCustomView"})
 public class ControlButton extends TextView implements ControlInterface {
     private final Paint mRectPaint = new Paint();
@@ -36,6 +40,18 @@ public class ControlButton extends TextView implements ControlInterface {
 
     protected boolean mIsToggled = false;
     protected boolean mIsPointerOutOfBounds = false;
+    private final Handler mClickerHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mClickerRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!isActivated() || !mProperties.isClicker) return;
+            int mappedButton = mProperties.clickerButton == ControlData.SPECIALBTN_MOUSESEC ?
+                    LwjglGlfwKeycode.GLFW_MOUSE_BUTTON_RIGHT : LwjglGlfwKeycode.GLFW_MOUSE_BUTTON_LEFT;
+            sendMouseButton(mappedButton, true);
+            sendMouseButton(mappedButton, false);
+            mClickerHandler.postDelayed(this, computeClickerDelayMs());
+        }
+    };
 
     public ControlButton(ControlLayout layout, ControlData properties) {
         super(layout.getContext());
@@ -191,6 +207,14 @@ public class ControlButton extends TextView implements ControlInterface {
     // This ensures predictable order when releasing mixed key bindings
     public void sendKeyPresses(boolean isDown){
         setActivated(isDown);
+        if (mProperties.isClicker) {
+            if (isDown) {
+                startClickerLoop();
+            } else {
+                stopClickerLoop();
+            }
+            return;
+        }
 
         // First pass: Process all regular keyboard keys
         for(int keycode : mProperties.keycodes){
@@ -206,6 +230,22 @@ public class ControlButton extends TextView implements ControlInterface {
                 sendSpecialKey(keycode, isDown);
             }
         }
+    }
+
+    private void startClickerLoop() {
+        stopClickerLoop();
+        mClickerHandler.post(mClickerRunnable);
+    }
+
+    private void stopClickerLoop() {
+        mClickerHandler.removeCallbacks(mClickerRunnable);
+    }
+
+    private long computeClickerDelayMs() {
+        int min = Math.max(1, Math.min(mProperties.minCps, mProperties.maxCps));
+        int max = Math.max(min, Math.max(mProperties.minCps, mProperties.maxCps));
+        int cps = ThreadLocalRandom.current().nextInt(min, max + 1);
+        return Math.max(1L, 1000L / cps);
     }
 
     private void sendSpecialKey(int keycode, boolean isDown){

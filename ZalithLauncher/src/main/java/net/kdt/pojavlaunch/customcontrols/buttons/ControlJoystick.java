@@ -11,6 +11,7 @@ import static net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick.DIRECTI
 import static net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick.DIRECTION_WEST;
 
 import android.annotation.SuppressLint;
+import android.graphics.Color;
 import android.view.View;
 
 import net.kdt.pojavlaunch.LwjglGlfwKeycode;
@@ -54,6 +55,8 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
         setDeadzone(35);
         setFixedCenter(data.absolute);
         setAutoReCenterButton(true);
+        setButtonSizeRatio(0f);
+        setButtonColor(Color.TRANSPARENT);
 
         injectBehaviors();
 

@@ -358,6 +358,53 @@
             app:layout_constraintTop_toBottomOf="@id/checkboxPassThrough"
             tools:ignore="UseSwitchCompatOrMaterialXml" />
 
+        <Switch
+            android:id="@+id/checkboxClicker"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/_36sdp"
+            android:text="@string/customctrl_clicker"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/checkboxSwipeable"
+            tools:ignore="UseSwitchCompatOrMaterialXml" />
+
+        <TextView
+            android:id="@+id/editMinCps_textView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/customctrl_clicker_min_cps"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/checkboxClicker" />
+
+        <com.movtery.zalithlauncher.ui.view.AnimEditText
+            android:id="@+id/editMinCps"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:background="@drawable/background_edit_box"
+            android:gravity="center"
+            android:inputType="number"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/editMinCps_textView" />
+
+        <TextView
+            android:id="@+id/editMaxCps_textView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/customctrl_clicker_max_cps"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/editMinCps" />
+
+        <com.movtery.zalithlauncher.ui.view.AnimEditText
+            android:id="@+id/editMaxCps"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:background="@drawable/background_edit_box"
+            android:gravity="center"
+            android:inputType="number"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/editMaxCps_textView" />
+
         <!-- FORWARD LOCK SECTION -->
         <Switch
             android:id="@+id/checkboxForwardLock"
@@ -365,7 +412,7 @@
             android:layout_height="@dimen/_36sdp"
             android:text="@string/customctrl_forward_lock"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/checkboxSwipeable"
+            app:layout_constraintTop_toBottomOf="@id/editMaxCps"
             tools:ignore="UseSwitchCompatOrMaterialXml" />
 
         <Switch

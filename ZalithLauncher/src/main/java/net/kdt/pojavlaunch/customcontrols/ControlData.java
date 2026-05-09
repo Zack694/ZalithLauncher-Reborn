@@ -70,6 +70,10 @@ public class ControlData {
     public boolean isSwipeable;
     public boolean displayInGame;
     public boolean displayInMenu;
+    public boolean isClicker;
+    public int clickerButton = SPECIALBTN_MOUSEPRI;
+    public int minCps = 8;
+    public int maxCps = 12;
     private float width;         //Dp instead of Px now
     private float height;        //Dp instead of Px now
 
@@ -156,6 +160,10 @@ public class ControlData {
                 controlData.isSwipeable,
                 controlData.passThruEnabled
         );
+        this.isClicker = controlData.isClicker;
+        this.clickerButton = controlData.clickerButton;
+        this.minCps = controlData.minCps;
+        this.maxCps = controlData.maxCps;
     }
 
     public static ControlData[] getSpecialButtons(Context context) {

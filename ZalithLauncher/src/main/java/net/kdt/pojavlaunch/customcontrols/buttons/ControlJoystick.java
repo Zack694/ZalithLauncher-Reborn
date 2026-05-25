@@ -38,6 +38,11 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
     private ControlJoystickData mControlData;
     private int mLastDirectionInt = GamepadJoystick.DIRECTION_NONE;
     private int mCurrentDirectionInt = GamepadJoystick.DIRECTION_NONE;
+    private boolean mForwardPressed = false;
+    private boolean mBackwardPressed = false;
+    private boolean mLeftPressed = false;
+    private boolean mRightPressed = false;
+    private static final int DEADZONE_STRENGTH = 35;
     public ControlJoystick(ControlLayout parent, ControlJoystickData data) {
         super(parent.getContext());
         init(data, parent);
@@ -52,7 +57,7 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
     private void init(ControlJoystickData data, ControlLayout layout) {
         mControlData = data;
         setProperties(preProcessProperties(data, layout));
-        setDeadzone(35);
+        setDeadzone(DEADZONE_STRENGTH);
         setFixedCenter(data.absolute);
         setAutoReCenterButton(true);
         setButtonSizeRatio(0f);
@@ -63,13 +68,7 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
         setOnMoveListener(new OnMoveListener() {
             @Override
             public void onMove(int angle, int strength) {
-                mLastDirectionInt = mCurrentDirectionInt;
-                mCurrentDirectionInt = getDirectionInt(angle, strength);
-
-                if (mLastDirectionInt != mCurrentDirectionInt) {
-                    sendDirectionalKeycode(mLastDirectionInt, false);
-                    sendDirectionalKeycode(mCurrentDirectionInt, true);
-                }
+                updateAxisStates(angle, strength);
             }
 
             @Override
@@ -128,9 +127,67 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
         editControlPopup.loadJoystickValues(mControlData);
     }
 
-    private int getDirectionInt(int angle, int intensity) {
-        if (intensity == 0) return DIRECTION_NONE;
-        return (int) (((angle + 22.5) / 45) % 8);
+    private void updateAxisStates(int angle, int intensity) {
+        if (intensity <= DEADZONE_STRENGTH) {
+            setDirectionalState(false, false, false, false);
+            return;
+        }
+
+        double radians = Math.toRadians(angle);
+        double magnitude = intensity / 100d;
+        double x = Math.cos(radians) * magnitude;
+        double y = -Math.sin(radians) * magnitude;
+
+        boolean nextForward = computeAxisPressed(-y, mForwardPressed);
+        boolean nextBackward = computeAxisPressed(y, mBackwardPressed);
+        boolean nextLeft = computeAxisPressed(-x, mLeftPressed);
+        boolean nextRight = computeAxisPressed(x, mRightPressed);
+
+        setDirectionalState(nextForward, nextBackward, nextLeft, nextRight);
+    }
+
+    private static boolean computeAxisPressed(double axisValue, boolean wasPressed) {
+        final double pressThreshold = 0.55d;
+        final double releaseThreshold = 0.35d;
+        if (wasPressed) {
+            return axisValue >= releaseThreshold;
+        }
+        return axisValue >= pressThreshold;
+    }
+
+    private void setDirectionalState(boolean forward, boolean backward, boolean left, boolean right) {
+        if (mForwardPressed != forward) {
+            mForwardPressed = forward;
+            sendInput(mDirectionForward, forward);
+        }
+        if (mBackwardPressed != backward) {
+            mBackwardPressed = backward;
+            sendInput(mDirectionBackward, backward);
+        }
+        if (mLeftPressed != left) {
+            mLeftPressed = left;
+            sendInput(mDirectionLeft, left);
+        }
+        if (mRightPressed != right) {
+            mRightPressed = right;
+            sendInput(mDirectionRight, right);
+        }
+
+        int nextDirection = getDirectionFromState(forward, backward, left, right);
+        mLastDirectionInt = mCurrentDirectionInt;
+        mCurrentDirectionInt = nextDirection;
+    }
+
+    private static int getDirectionFromState(boolean forward, boolean backward, boolean left, boolean right) {
+        if (forward && right) return DIRECTION_NORTH_EAST;
+        if (forward && left) return DIRECTION_NORTH_WEST;
+        if (backward && right) return DIRECTION_SOUTH_EAST;
+        if (backward && left) return DIRECTION_SOUTH_WEST;
+        if (forward) return DIRECTION_NORTH;
+        if (right) return DIRECTION_EAST;
+        if (backward) return DIRECTION_SOUTH;
+        if (left) return DIRECTION_WEST;
+        return DIRECTION_NONE;
     }
 
     private void sendDirectionalKeycode(int direction, boolean isDown) {

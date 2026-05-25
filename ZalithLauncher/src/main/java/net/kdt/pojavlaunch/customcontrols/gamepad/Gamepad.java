@@ -458,7 +458,7 @@ public class Gamepad implements GrabListener, GamepadHandler {
                 break;
 
             default:
-                sendKeyPress(LwjglGlfwKeycode.GLFW_KEY_SPACE, CallbackBridge.getCurrentMods(), isKeyEventDown);
+                // Ignore unmapped/unknown axes and keycodes to avoid injecting unintended input.
                 break;
         }
     }

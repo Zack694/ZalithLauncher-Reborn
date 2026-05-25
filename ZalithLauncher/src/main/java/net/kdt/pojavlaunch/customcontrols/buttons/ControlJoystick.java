@@ -38,6 +38,9 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
     private ControlJoystickData mControlData;
     private int mLastDirectionInt = GamepadJoystick.DIRECTION_NONE;
     private int mCurrentDirectionInt = GamepadJoystick.DIRECTION_NONE;
+    private static final int DEADZONE_STRENGTH = 35;
+    private static final int DIRECTION_HYSTERESIS_STRENGTH = 12;
+    private static final double DIRECTION_HYSTERESIS_ANGLE_DEGREES = 9d;
     public ControlJoystick(ControlLayout parent, ControlJoystickData data) {
         super(parent.getContext());
         init(data, parent);
@@ -52,7 +55,7 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
     private void init(ControlJoystickData data, ControlLayout layout) {
         mControlData = data;
         setProperties(preProcessProperties(data, layout));
-        setDeadzone(35);
+        setDeadzone(DEADZONE_STRENGTH);
         setFixedCenter(data.absolute);
         setAutoReCenterButton(true);
         setButtonSizeRatio(0f);
@@ -64,7 +67,7 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
             @Override
             public void onMove(int angle, int strength) {
                 mLastDirectionInt = mCurrentDirectionInt;
-                mCurrentDirectionInt = getDirectionInt(angle, strength);
+                mCurrentDirectionInt = getDirectionInt(angle, strength, mLastDirectionInt);
 
                 if (mLastDirectionInt != mCurrentDirectionInt) {
                     sendDirectionalKeycode(mLastDirectionInt, false);
@@ -128,9 +131,26 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
         editControlPopup.loadJoystickValues(mControlData);
     }
 
-    private int getDirectionInt(int angle, int intensity) {
-        if (intensity == 0) return DIRECTION_NONE;
-        return (int) (((angle + 22.5) / 45) % 8);
+    private int getDirectionInt(int angle, int intensity, int lastDirection) {
+        if (intensity <= DEADZONE_STRENGTH) return DIRECTION_NONE;
+
+        int candidateDirection = (int) (((angle + 22.5) / 45) % 8);
+        if (lastDirection == DIRECTION_NONE || candidateDirection == lastDirection) return candidateDirection;
+
+        if (intensity <= DEADZONE_STRENGTH + DIRECTION_HYSTERESIS_STRENGTH) {
+            double previousCenter = lastDirection * 45d;
+            double distanceFromPrevious = angularDistance(angle, previousCenter);
+            if (distanceFromPrevious <= (22.5d + DIRECTION_HYSTERESIS_ANGLE_DEGREES)) {
+                return lastDirection;
+            }
+        }
+
+        return candidateDirection;
+    }
+
+    private static double angularDistance(double a, double b) {
+        double diff = Math.abs(a - b) % 360d;
+        return diff > 180d ? 360d - diff : diff;
     }
 
     private void sendDirectionalKeycode(int direction, boolean isDown) {

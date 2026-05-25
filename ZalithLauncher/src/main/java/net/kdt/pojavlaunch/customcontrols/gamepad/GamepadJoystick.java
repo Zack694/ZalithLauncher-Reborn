@@ -68,8 +68,16 @@ public class GamepadJoystick {
     }
 
 
+    public float getAxisDeadzone(){
+        InputDevice.MotionRange horizontalRange = mInputDevice.getMotionRange(mHorizontalAxis, InputDevice.SOURCE_JOYSTICK);
+        InputDevice.MotionRange verticalRange = mInputDevice.getMotionRange(mVerticalAxis, InputDevice.SOURCE_JOYSTICK);
+        float horizontalFlat = horizontalRange != null ? horizontalRange.getFlat() : 0f;
+        float verticalFlat = verticalRange != null ? verticalRange.getFlat() : 0f;
+        return Math.max(horizontalFlat, verticalFlat);
+    }
+
     public int getHeightDirection(){
-        if(getMagnitude() == 0) return DIRECTION_NONE;
+        if(getMagnitude() <= getAxisDeadzone()) return DIRECTION_NONE;
         return ((int) ((getAngleDegree()+22.5)/45)) % 8;
     }
 

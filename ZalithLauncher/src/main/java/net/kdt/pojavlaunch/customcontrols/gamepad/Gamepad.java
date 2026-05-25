@@ -58,6 +58,7 @@ public class Gamepad implements GrabListener, GamepadHandler {
 
     private final GamepadJoystick mLeftJoystick;
     private int mCurrentJoystickDirection = DIRECTION_NONE;
+    private static final double DIRECTION_HYSTERESIS_RATIO = 0.12d;
 
     private final GamepadJoystick mRightJoystick;
     private float mLastHorizontalValue = 0.0f;
@@ -262,10 +263,19 @@ public class Gamepad implements GrabListener, GamepadHandler {
         GamepadJoystick currentJoystick = isGrabbing ? mLeftJoystick : mRightJoystick;
 
         int lastJoystickDirection = mCurrentJoystickDirection;
-        mCurrentJoystickDirection = currentJoystick.getHeightDirection();
+        int nextDirection = currentJoystick.getHeightDirection();
 
-        if(mCurrentJoystickDirection == lastJoystickDirection) return;
+        if(nextDirection != DIRECTION_NONE && lastJoystickDirection != DIRECTION_NONE && nextDirection != lastJoystickDirection){
+            double magnitude = currentJoystick.getMagnitude();
+            double keepDirectionThreshold = Math.min(1d, currentJoystick.getAxisDeadzone() + DIRECTION_HYSTERESIS_RATIO);
+            if(magnitude < keepDirectionThreshold){
+                nextDirection = lastJoystickDirection;
+            }
+        }
 
+        if(nextDirection == lastJoystickDirection) return;
+
+        mCurrentJoystickDirection = nextDirection;
         sendDirectionalKeycode(lastJoystickDirection, false, getCurrentMap());
         sendDirectionalKeycode(mCurrentJoystickDirection, true, getCurrentMap());
     }

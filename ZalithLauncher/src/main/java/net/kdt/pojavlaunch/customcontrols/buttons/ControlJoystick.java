@@ -1,15 +1,5 @@
 package net.kdt.pojavlaunch.customcontrols.buttons;
 
-import static net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick.DIRECTION_EAST;
-import static net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick.DIRECTION_NONE;
-import static net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick.DIRECTION_NORTH;
-import static net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick.DIRECTION_NORTH_EAST;
-import static net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick.DIRECTION_NORTH_WEST;
-import static net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick.DIRECTION_SOUTH;
-import static net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick.DIRECTION_SOUTH_EAST;
-import static net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick.DIRECTION_SOUTH_WEST;
-import static net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick.DIRECTION_WEST;
-
 import android.annotation.SuppressLint;
 import android.graphics.Color;
 import android.view.View;
@@ -19,7 +9,6 @@ import net.kdt.pojavlaunch.Tools;
 import net.kdt.pojavlaunch.customcontrols.ControlData;
 import net.kdt.pojavlaunch.customcontrols.ControlJoystickData;
 import net.kdt.pojavlaunch.customcontrols.ControlLayout;
-import net.kdt.pojavlaunch.customcontrols.gamepad.GamepadJoystick;
 import net.kdt.pojavlaunch.customcontrols.handleview.EditControlPopup;
 
 import org.lwjgl.glfw.CallbackBridge;
@@ -36,13 +25,51 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
     private final int[] mDirectionBackward = new int[]{LwjglGlfwKeycode.GLFW_KEY_S};
     private final int[] mDirectionLeft = new int[]{LwjglGlfwKeycode.GLFW_KEY_A};
     private ControlJoystickData mControlData;
-    private int mLastDirectionInt = GamepadJoystick.DIRECTION_NONE;
-    private int mCurrentDirectionInt = GamepadJoystick.DIRECTION_NONE;
     private boolean mForwardPressed = false;
     private boolean mBackwardPressed = false;
     private boolean mLeftPressed = false;
     private boolean mRightPressed = false;
     private static final int DEADZONE_STRENGTH = 35;
+
+    /*
+     * Zone-based directional input.
+     *
+     * The 360-degree joystick range is divided into 8 angular zones (45 deg each):
+     *   0=E, 1=NE, 2=N, 3=NW, 4=W, 5=SW, 6=S, 7=SE
+     * plus a -1 "no zone" state used for the deadzone.
+     *
+     * Each zone maps to a fixed combination of W/A/S/D. While the finger stays
+     * inside a zone, no key events are emitted regardless of magnitude or
+     * angular wobble - W/A/S/D are simply held. Crossing a zone boundary emits
+     * exactly the diff between the two zones' key sets, never a flicker.
+     *
+     * To prevent flicker right at a boundary, we apply angular hysteresis:
+     * once a zone is active, the user must push beyond ZONE_EXIT_HALFWIDTH_DEG
+     * from that zone's center (instead of the implicit 22.5 deg enter
+     * half-width) before we consider another zone.
+     *
+     * This replaces the previous per-axis hysteresis approach, which mapped
+     * a continuous 2D input through two independent 1D thresholds and could
+     * rapidly toggle W/A/S/D from normal thumb wobble - causing visible
+     * movement stutter in Minecraft even at stable FPS, since each key edge
+     * resets the player's movement acceleration / sprint state.
+     */
+    private static final int ZONE_NONE = -1;
+    private static final int ZONE_E  = 0;
+    private static final int ZONE_NE = 1;
+    private static final int ZONE_N  = 2;
+    private static final int ZONE_NW = 3;
+    private static final int ZONE_W  = 4;
+    private static final int ZONE_SW = 5;
+    private static final int ZONE_S  = 6;
+    private static final int ZONE_SE = 7;
+
+    private static final double ZONE_WIDTH_DEG = 45.0;
+    /** Angular hysteresis: stay in current zone while within +/-30 deg of its center. */
+    private static final double ZONE_EXIT_HALFWIDTH_DEG = 30.0;
+
+    private int mActiveZone = ZONE_NONE;
+
     public ControlJoystick(ControlLayout parent, ControlJoystickData data) {
         super(parent.getContext());
         init(data, parent);
@@ -127,32 +154,75 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
         editControlPopup.loadJoystickValues(mControlData);
     }
 
-    private void updateAxisStates(int angle, int intensity) {
-        if (intensity <= DEADZONE_STRENGTH) {
-            setDirectionalState(false, false, false, false);
+    /**
+     * Resolve the current (angle, strength) pair into a single discrete zone
+     * and fire any key transitions needed to reach that zone's key combo.
+     *
+     * Driven by the underlying JoystickView's polling thread (~20 Hz while
+     * the finger is held). When the resolved zone is unchanged from last
+     * tick this method emits zero key events, even though it runs every tick.
+     */
+    private void updateAxisStates(int angle, int strength) {
+        int targetZone = resolveZone(angle, strength, mActiveZone);
+        if (targetZone == mActiveZone) {
             return;
         }
-
-        double radians = Math.toRadians(angle);
-        double magnitude = intensity / 100d;
-        double x = Math.cos(radians) * magnitude;
-        double y = -Math.sin(radians) * magnitude;
-
-        boolean nextForward = computeAxisPressed(-y, mForwardPressed);
-        boolean nextBackward = computeAxisPressed(y, mBackwardPressed);
-        boolean nextLeft = computeAxisPressed(-x, mLeftPressed);
-        boolean nextRight = computeAxisPressed(x, mRightPressed);
-
-        setDirectionalState(nextForward, nextBackward, nextLeft, nextRight);
+        mActiveZone = targetZone;
+        applyZone(targetZone);
     }
 
-    private static boolean computeAxisPressed(double axisValue, boolean wasPressed) {
-        final double pressThreshold = 0.55d;
-        final double releaseThreshold = 0.35d;
-        if (wasPressed) {
-            return axisValue >= releaseThreshold;
+    /**
+     * Pick the zone the user is currently in, with angular hysteresis around
+     * each zone boundary so that thumb wobble inside a zone (or right at an
+     * edge) does not cause key events to flicker.
+     */
+    private static int resolveZone(int angle, int strength, int currentZone) {
+        if (strength <= DEADZONE_STRENGTH) {
+            return ZONE_NONE;
         }
-        return axisValue >= pressThreshold;
+
+        int normalizedAngle = ((angle % 360) + 360) % 360;
+
+        // Hysteresis: keep the current zone as long as the angle is still
+        // within the (wider) exit half-width of that zone's center.
+        if (currentZone != ZONE_NONE) {
+            double currentZoneCenter = currentZone * ZONE_WIDTH_DEG;
+            if (angularDistance(normalizedAngle, currentZoneCenter) <= ZONE_EXIT_HALFWIDTH_DEG) {
+                return currentZone;
+            }
+        }
+
+        // Otherwise, snap to the nearest zone center (each zone is 45 deg wide,
+        // so this is equivalent to a 22.5 deg enter half-width).
+        return ((int) Math.round(normalizedAngle / ZONE_WIDTH_DEG)) & 7;
+    }
+
+    /**
+     * Smallest unsigned angular distance between two angles in degrees.
+     */
+    private static double angularDistance(double a, double b) {
+        double diff = Math.abs(a - b) % 360.0;
+        return Math.min(diff, 360.0 - diff);
+    }
+
+    /**
+     * Map the resolved zone to its W/A/S/D combo and dispatch only the
+     * differences vs. the currently-held keys.
+     */
+    private void applyZone(int zone) {
+        boolean forward, backward, left, right;
+        switch (zone) {
+            case ZONE_E:  forward=false; backward=false; left=false; right=true;  break;
+            case ZONE_NE: forward=true;  backward=false; left=false; right=true;  break;
+            case ZONE_N:  forward=true;  backward=false; left=false; right=false; break;
+            case ZONE_NW: forward=true;  backward=false; left=true;  right=false; break;
+            case ZONE_W:  forward=false; backward=false; left=true;  right=false; break;
+            case ZONE_SW: forward=false; backward=true;  left=true;  right=false; break;
+            case ZONE_S:  forward=false; backward=true;  left=false; right=false; break;
+            case ZONE_SE: forward=false; backward=true;  left=false; right=true;  break;
+            default:      forward=false; backward=false; left=false; right=false; break;
+        }
+        setDirectionalState(forward, backward, left, right);
     }
 
     private void setDirectionalState(boolean forward, boolean backward, boolean left, boolean right) {
@@ -172,58 +242,5 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
             mRightPressed = right;
             sendInput(mDirectionRight, right);
         }
-
-        int nextDirection = getDirectionFromState(forward, backward, left, right);
-        mLastDirectionInt = mCurrentDirectionInt;
-        mCurrentDirectionInt = nextDirection;
     }
-
-    private static int getDirectionFromState(boolean forward, boolean backward, boolean left, boolean right) {
-        if (forward && right) return DIRECTION_NORTH_EAST;
-        if (forward && left) return DIRECTION_NORTH_WEST;
-        if (backward && right) return DIRECTION_SOUTH_EAST;
-        if (backward && left) return DIRECTION_SOUTH_WEST;
-        if (forward) return DIRECTION_NORTH;
-        if (right) return DIRECTION_EAST;
-        if (backward) return DIRECTION_SOUTH;
-        if (left) return DIRECTION_WEST;
-        return DIRECTION_NONE;
-    }
-
-    private void sendDirectionalKeycode(int direction, boolean isDown) {
-        switch (direction) {
-            case DIRECTION_NORTH:
-                sendInput(mDirectionForward, isDown);
-                break;
-            case DIRECTION_NORTH_EAST:
-                sendInput(mDirectionForward, isDown);
-                sendInput(mDirectionRight, isDown);
-                break;
-            case DIRECTION_EAST:
-                sendInput(mDirectionRight, isDown);
-                break;
-            case DIRECTION_SOUTH_EAST:
-                sendInput(mDirectionRight, isDown);
-                sendInput(mDirectionBackward, isDown);
-                break;
-            case DIRECTION_SOUTH:
-                sendInput(mDirectionBackward, isDown);
-                break;
-            case DIRECTION_SOUTH_WEST:
-                sendInput(mDirectionBackward, isDown);
-                sendInput(mDirectionLeft, isDown);
-                break;
-            case DIRECTION_WEST:
-                sendInput(mDirectionLeft, isDown);
-                break;
-            case DIRECTION_NORTH_WEST:
-                sendInput(mDirectionForward, isDown);
-                sendInput(mDirectionLeft, isDown);
-                break;
-            case DIRECTION_FORWARD_LOCK:
-                sendInput(mDirectionForwardLock, isDown);
-                break;
-        }
-    }
-
 }

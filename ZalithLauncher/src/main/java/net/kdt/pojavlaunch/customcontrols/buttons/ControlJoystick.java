@@ -2,6 +2,7 @@ package net.kdt.pojavlaunch.customcontrols.buttons;
 
 import android.annotation.SuppressLint;
 import android.graphics.Color;
+import android.view.Choreographer;
 import android.view.View;
 
 import net.kdt.pojavlaunch.LwjglGlfwKeycode;
@@ -70,6 +71,42 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
 
     private int mActiveZone = ZONE_NONE;
 
+    /*
+     * Touch-rate to display-rate coalescing.
+     *
+     * The third-party JoystickView fires OnMoveListener.onMove() synchronously
+     * from inside its onTouchEvent() on every ACTION_MOVE sample. On modern
+     * Android panels that is 120-240 Hz (and even higher on gaming phones),
+     * which means the entire updateAxisStates -> resolveZone -> applyZone
+     * chain ran 120-240 times per second on the UI thread while a finger
+     * was on the joystick - even though zone hysteresis already suppressed
+     * any actual W/A/S/D key edges.
+     *
+     * That UI-thread saturation was the root cause of the in-game stutter
+     * users felt while walking with the on-screen joystick (visible even at
+     * stable FPS, only when the joystick was being held / moved, never with
+     * buttons because ControlButton does ~no work on ACTION_MOVE).
+     *
+     * The fix here: onMove just records the latest (angle, strength) and
+     * schedules at most one Choreographer frame callback. The callback runs
+     * once per vsync and consumes the latest snapshot. This caps zone
+     * resolution at display rate (60-120 Hz) regardless of touch sample rate,
+     * adds at most ~1 frame of input latency (well under the 50 ms Minecraft
+     * tick), and matches the cadence physical gamepads already use through
+     * Gamepad.java's Choreographer pump.
+     */
+    private final Choreographer mChoreographer = Choreographer.getInstance();
+    private int mLatestAngle = 0;
+    private int mLatestStrength = 0;
+    private boolean mPendingFrame = false;
+    private final Choreographer.FrameCallback mFrameCallback = new Choreographer.FrameCallback() {
+        @Override
+        public void doFrame(long frameTimeNanos) {
+            mPendingFrame = false;
+            updateAxisStates(mLatestAngle, mLatestStrength);
+        }
+    };
+
     public ControlJoystick(ControlLayout parent, ControlJoystickData data) {
         super(parent.getContext());
         init(data, parent);
@@ -95,11 +132,23 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
         setOnMoveListener(new OnMoveListener() {
             @Override
             public void onMove(int angle, int strength) {
-                updateAxisStates(angle, strength);
+                // Stash the latest sample and schedule (at most) one frame
+                // callback. The third-party lib calls this at touch-sample
+                // rate (120-240 Hz on modern phones); we drain it once per
+                // vsync to avoid saturating the UI thread. See the block
+                // comment on mFrameCallback for the rationale.
+                mLatestAngle = angle;
+                mLatestStrength = strength;
+                if (!mPendingFrame) {
+                    mPendingFrame = true;
+                    mChoreographer.postFrameCallback(mFrameCallback);
+                }
             }
 
             @Override
             public void onForwardLock(boolean isLocked) {
+                // The lib already edge-triggers this (only fires on a real
+                // lock/unlock transition), so no coalescing needed here.
                 sendInput(mDirectionForwardLock, isLocked);
             }
         });
@@ -158,9 +207,10 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
      * Resolve the current (angle, strength) pair into a single discrete zone
      * and fire any key transitions needed to reach that zone's key combo.
      *
-     * Driven by the underlying JoystickView's polling thread (~20 Hz while
-     * the finger is held). When the resolved zone is unchanged from last
-     * tick this method emits zero key events, even though it runs every tick.
+     * Called from the Choreographer frame callback (display rate, 60-120 Hz),
+     * which coalesces the third-party JoystickView's much higher per-touch-
+     * sample callback rate. When the resolved zone is unchanged from last
+     * tick this method emits zero key events.
      */
     private void updateAxisStates(int angle, int strength) {
         int targetZone = resolveZone(angle, strength, mActiveZone);
@@ -242,5 +292,16 @@ public class ControlJoystick extends JoystickView implements ControlInterface {
             mRightPressed = right;
             sendInput(mDirectionRight, right);
         }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        // Make sure the pending Choreographer callback never fires against a
+        // detached view (would also leak this view via the FrameCallback).
+        if (mPendingFrame) {
+            mChoreographer.removeFrameCallback(mFrameCallback);
+            mPendingFrame = false;
+        }
+        super.onDetachedFromWindow();
     }
 }

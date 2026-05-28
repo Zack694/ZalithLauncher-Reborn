@@ -239,7 +239,6 @@ dependencies {
     implementation("com.github.PojavLauncherTeam:portrait-ssp:6c02fd739b")
     implementation("com.github.Mathias-Boulay:ExtendedView:1.0.0")
     implementation("com.github.Mathias-Boulay:android_gamepad_remapper:2.0.3")
-    implementation("com.github.Mathias-Boulay:virtual-joystick-android:1.14")
     implementation("com.github.skydoves:powerspinner:1.2.7")
     implementation("com.github.bumptech.glide:glide:4.16.0")
     implementation("com.github.angcyo.DslTablayout:TabLayout:3.6.5")

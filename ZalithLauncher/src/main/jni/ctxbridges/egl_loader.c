@@ -5,8 +5,17 @@
 #include <stdlib.h>
 #include <dlfcn.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include <stdarg.h>
+#include <android/log.h>
 #include "br_loader.h"
 #include "egl_loader.h"
+#include "../driver_helper/nsbypass.h"
+
+static const char* EGL_LOADER_TAG = "ZalithEGLLoader";
+static void* g_egl_handle = NULL;
+static char g_egl_loaded_name[512];
 
 EGLBoolean (*eglMakeCurrent_p) (EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx);
 EGLBoolean (*eglDestroyContext_p) (EGLDisplay dpy, EGLContext ctx);
@@ -15,6 +24,7 @@ EGLBoolean (*eglTerminate_p) (EGLDisplay dpy);
 EGLBoolean (*eglReleaseThread_p) (void);
 EGLContext (*eglGetCurrentContext_p) (void);
 EGLDisplay (*eglGetDisplay_p) (NativeDisplayType display);
+EGLDisplay (*eglGetPlatformDisplay_p) (EGLenum platform, void* native_display, const EGLint* attrib_list);
 EGLBoolean (*eglInitialize_p) (EGLDisplay dpy, EGLint *major, EGLint *minor);
 EGLBoolean (*eglChooseConfig_p) (EGLDisplay dpy, const EGLint *attrib_list, EGLConfig *configs, EGLint config_size, EGLint *num_config);
 EGLBoolean (*eglGetConfigAttrib_p) (EGLDisplay dpy, EGLConfig config, EGLint attribute, EGLint *value);
@@ -25,13 +35,128 @@ EGLBoolean (*eglSwapBuffers_p) (EGLDisplay dpy, EGLSurface draw);
 EGLint (*eglGetError_p) (void);
 EGLContext (*eglCreateContext_p) (EGLDisplay dpy, EGLConfig config, EGLContext share_list, const EGLint *attrib_list);
 EGLBoolean (*eglSwapInterval_p) (EGLDisplay dpy, EGLint interval);
+EGLBoolean (*eglSurfaceAttrib_p) (EGLDisplay dpy, EGLSurface surface, EGLint attribute, EGLint value);
 EGLSurface (*eglGetCurrentSurface_p) (EGLint readdraw);
 EGLBoolean (*eglQuerySurface_p)(EGLDisplay display, EGLSurface surface, EGLint attribute, EGLint * value);
+const char* (*eglQueryString_p)(EGLDisplay display, EGLint name);
+
+static bool env_enabled(const char* name) {
+    const char* value = getenv(name);
+    return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0 && strcmp(value, "false") != 0;
+}
+
+static void loader_log(const char* fmt, ...) {
+    char buffer[2048];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buffer, sizeof(buffer), fmt, ap);
+    va_end(ap);
+    __android_log_print(ANDROID_LOG_INFO, EGL_LOADER_TAG, "%s", buffer);
+    fprintf(stderr, "%s: %s\n", EGL_LOADER_TAG, buffer);
+    fflush(stderr);
+}
+
+static void* try_dlopen_egl(const char* name, int flags) {
+    if (name == NULL || name[0] == '\0') return NULL;
+
+    dlerror();
+    void* handle = dlopen(name, flags);
+    if (handle != NULL) {
+        snprintf(g_egl_loaded_name, sizeof(g_egl_loaded_name), "%s", name);
+        loader_log("loaded EGL library %s handle=%p flags=0x%x", name, handle, flags);
+        return handle;
+    }
+
+    const char* error = dlerror();
+    loader_log("failed to load EGL library %s: %s", name, error ? error : "unknown");
+    return NULL;
+}
+
+static const char* file_name_only(const char* path) {
+    if (path == NULL || path[0] == '\0') return path;
+    const char* slash = strrchr(path, '/');
+    return slash != NULL ? slash + 1 : path;
+}
+
+static void* try_namespace_egl_once(const char* namespace_path, const char* short_name, int flags) {
+    if (namespace_path == NULL || namespace_path[0] == '\0') return NULL;
+
+    if (!linker_ns_load(namespace_path)) {
+        loader_log("Mesa namespace load failed path=%s library=%s", namespace_path, short_name);
+        return NULL;
+    }
+
+    dlerror();
+    void* handle = linker_ns_dlopen(short_name, flags | RTLD_GLOBAL);
+    if (handle != NULL) {
+        snprintf(g_egl_loaded_name, sizeof(g_egl_loaded_name), "%s (namespace)", short_name);
+        loader_log("Loaded EGL %s (in namespace: 1) path=%s handle=%p", short_name, namespace_path, handle);
+        return handle;
+    }
+
+    const char* error = dlerror();
+    loader_log("Mesa namespace EGL short-name load failed library=%s path=%s error=%s",
+               short_name, namespace_path, error ? error : "unknown");
+
+    const char* absolute = getenv("ZALITH_MESA_EGL");
+    if (absolute == NULL || absolute[0] == '\0') {
+        absolute = getenv("DROIDBRIDGE_MESA_EGL");
+    }
+    if (absolute != NULL && absolute[0] != '\0') {
+        dlerror();
+        handle = linker_ns_dlopen(absolute, flags | RTLD_GLOBAL);
+        if (handle != NULL) {
+            snprintf(g_egl_loaded_name, sizeof(g_egl_loaded_name), "%s (namespace)", absolute);
+            loader_log("Loaded EGL %s (in namespace: 1) path=%s handle=%p", absolute, namespace_path, handle);
+            return handle;
+        }
+        error = dlerror();
+        loader_log("Mesa namespace EGL absolute load failed library=%s path=%s error=%s",
+                   absolute, namespace_path, error ? error : "unknown");
+    }
+
+    return NULL;
+}
+
+static void* try_namespace_egl(const char* library_name, int flags) {
+    if (!env_enabled("ZALITH_MESA_NAMESPACE") && !env_enabled("DROIDBRIDGE_MESA_NAMESPACE")) return NULL;
+
+    const char* short_name = file_name_only(library_name);
+    if (short_name == NULL || short_name[0] == '\0') short_name = "libEGL_mesa.so";
+
+    void* handle = try_namespace_egl_once(getenv("ZALITH_MESA_NATIVE_DIR"), short_name, flags);
+    if (handle != NULL) return handle;
+
+    handle = try_namespace_egl_once(getenv("DROIDBRIDGE_MESA_NATIVE_DIR"), short_name, flags);
+    if (handle != NULL) return handle;
+
+    handle = try_namespace_egl_once(getenv("POJAV_NATIVEDIR"), short_name, flags);
+    if (handle != NULL) return handle;
+
+    handle = try_namespace_egl_once(getenv("ZALITH_MESA_NAMESPACE_PATH"), short_name, flags);
+    if (handle != NULL) return handle;
+
+    handle = try_namespace_egl_once(getenv("DROIDBRIDGE_MESA_NAMESPACE_PATH"), short_name, flags);
+    if (handle != NULL) return handle;
+
+    loader_log("Mesa namespace requested but namespace EGL loading did not succeed");
+    return NULL;
+}
+
+void* zalith_egl_get_handle(void) {
+    return g_egl_handle;
+}
+
+const char* zalith_egl_get_loaded_name(void) {
+    return g_egl_loaded_name[0] != '\0' ? g_egl_loaded_name : "<none>";
+}
 
 void dlsym_EGL() {
-    void* dl_handle = NULL;
+    if (g_egl_handle != NULL) return;
+
     char* eglName = NULL;
     char* gles = getenv("LIBGL_GLES");
+    bool mesa = env_enabled("ZALITH_MESA") || env_enabled("DROIDBRIDGE_MESA");
 
     if (gles && !strncmp(gles, "libGLESv2_angle.so", 18))
     {
@@ -40,31 +165,60 @@ void dlsym_EGL() {
         eglName = getenv("POJAVEXEC_EGL");
     }
 
-    if (eglName)
-        dl_handle = dlopen(eglName, RTLD_LOCAL | RTLD_LAZY);
+    int flags = RTLD_NOW | (mesa ? RTLD_GLOBAL : RTLD_LOCAL);
 
-    if (dl_handle == NULL)
-        dl_handle = dlopen("libEGL.so", RTLD_LOCAL | RTLD_LAZY);
+    if (mesa) {
+        g_egl_handle = try_namespace_egl(getenv("POJAVEXEC_EGL"), flags);
+        if (g_egl_handle == NULL) {
+            g_egl_handle = try_namespace_egl(getenv("ZALITH_MESA_EGL"), flags);
+        }
+        if (g_egl_handle == NULL) {
+            g_egl_handle = try_namespace_egl(getenv("DROIDBRIDGE_MESA_EGL"), flags);
+        }
+        if (g_egl_handle == NULL) {
+            g_egl_handle = try_dlopen_egl(getenv("ZALITH_MESA_EGL"), flags);
+        }
+        if (g_egl_handle == NULL) {
+            g_egl_handle = try_dlopen_egl(getenv("DROIDBRIDGE_MESA_EGL"), flags);
+        }
+    }
 
-    if (dl_handle == NULL) abort();
+    if (g_egl_handle == NULL && eglName != NULL)
+        g_egl_handle = try_dlopen_egl(eglName, flags);
 
-    eglBindAPI_p = GLGetProcAddress(dl_handle, "eglBindAPI");
-    eglChooseConfig_p = GLGetProcAddress(dl_handle, "eglChooseConfig");
-    eglCreateContext_p = GLGetProcAddress(dl_handle, "eglCreateContext");
-    eglCreatePbufferSurface_p = GLGetProcAddress(dl_handle, "eglCreatePbufferSurface");
-    eglCreateWindowSurface_p = GLGetProcAddress(dl_handle, "eglCreateWindowSurface");
-    eglDestroyContext_p = GLGetProcAddress(dl_handle, "eglDestroyContext");
-    eglDestroySurface_p = GLGetProcAddress(dl_handle, "eglDestroySurface");
-    eglGetConfigAttrib_p = GLGetProcAddress(dl_handle, "eglGetConfigAttrib");
-    eglGetCurrentContext_p = GLGetProcAddress(dl_handle, "eglGetCurrentContext");
-    eglGetDisplay_p = GLGetProcAddress(dl_handle, "eglGetDisplay");
-    eglGetError_p = GLGetProcAddress(dl_handle, "eglGetError");
-    eglInitialize_p = GLGetProcAddress(dl_handle, "eglInitialize");
-    eglMakeCurrent_p = GLGetProcAddress(dl_handle, "eglMakeCurrent");
-    eglSwapBuffers_p = GLGetProcAddress(dl_handle, "eglSwapBuffers");
-    eglReleaseThread_p = GLGetProcAddress(dl_handle, "eglReleaseThread");
-    eglSwapInterval_p = GLGetProcAddress(dl_handle, "eglSwapInterval");
-    eglTerminate_p = GLGetProcAddress(dl_handle, "eglTerminate");
-    eglGetCurrentSurface_p = GLGetProcAddress(dl_handle,"eglGetCurrentSurface");
-    eglQuerySurface_p = GLGetProcAddress(dl_handle, "eglQuerySurface");
+    if (g_egl_handle == NULL)
+        g_egl_handle = try_dlopen_egl("libEGL.so", RTLD_NOW | RTLD_LOCAL);
+
+    if (g_egl_handle == NULL) abort();
+
+#define EGLSYM(name) GLGetProcAddress(g_egl_handle, name)
+    eglBindAPI_p = EGLSYM("eglBindAPI");
+    eglChooseConfig_p = EGLSYM("eglChooseConfig");
+    eglCreateContext_p = EGLSYM("eglCreateContext");
+    eglCreatePbufferSurface_p = EGLSYM("eglCreatePbufferSurface");
+    eglCreateWindowSurface_p = EGLSYM("eglCreateWindowSurface");
+    eglDestroyContext_p = EGLSYM("eglDestroyContext");
+    eglDestroySurface_p = EGLSYM("eglDestroySurface");
+    eglGetConfigAttrib_p = EGLSYM("eglGetConfigAttrib");
+    eglGetCurrentContext_p = EGLSYM("eglGetCurrentContext");
+    eglGetDisplay_p = EGLSYM("eglGetDisplay");
+    eglGetPlatformDisplay_p = EGLSYM("eglGetPlatformDisplay");
+    if (eglGetPlatformDisplay_p == NULL) {
+        eglGetPlatformDisplay_p = EGLSYM("eglGetPlatformDisplayEXT");
+    }
+    eglGetError_p = EGLSYM("eglGetError");
+    eglInitialize_p = EGLSYM("eglInitialize");
+    eglMakeCurrent_p = EGLSYM("eglMakeCurrent");
+    eglSwapBuffers_p = EGLSYM("eglSwapBuffers");
+    eglReleaseThread_p = EGLSYM("eglReleaseThread");
+    eglSwapInterval_p = EGLSYM("eglSwapInterval");
+    eglSurfaceAttrib_p = EGLSYM("eglSurfaceAttrib");
+    eglTerminate_p = EGLSYM("eglTerminate");
+    eglGetCurrentSurface_p = EGLSYM("eglGetCurrentSurface");
+    eglQuerySurface_p = EGLSYM("eglQuerySurface");
+    eglQueryString_p = EGLSYM("eglQueryString");
+#undef EGLSYM
+
+    loader_log("EGL symbols loaded from %s getPlatformDisplay=%p queryString=%p",
+               zalith_egl_get_loaded_name(), eglGetPlatformDisplay_p, eglQueryString_p);
 }

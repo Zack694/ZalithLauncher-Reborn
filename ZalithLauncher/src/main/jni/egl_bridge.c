@@ -4,6 +4,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -89,9 +90,38 @@ EXTERNAL_API void* pojavGetCurrentContext() {
 }
 
 static void set_vulkan_ptr(void* ptr) {
+    if (ptr == NULL) {
+        unsetenv("VULKAN_PTR");
+        return;
+    }
+
     char envval[64];
     sprintf(envval, "%"PRIxPTR, (uintptr_t)ptr);
     setenv("VULKAN_PTR", envval, 1);
+}
+
+static bool env_is(const char* value, const char* expected) {
+    return value != NULL && expected != NULL && strcmp(value, expected) == 0;
+}
+
+static bool env_enabled(const char* value) {
+    return value != NULL
+           && value[0] != '\0'
+           && strcmp(value, "0") != 0
+           && strcmp(value, "false") != 0
+           && strcmp(value, "FALSE") != 0;
+}
+
+static bool is_direct_mesa_kgsl(const char* renderer,
+                                const char* zalith_mesa_mode,
+                                const char* droidbridge_mesa_mode,
+                                const char* zalith_mesa_driver,
+                                const char* droidbridge_mesa_driver) {
+    return env_is(renderer, "freedreno_kgsl")
+           || env_is(zalith_mesa_mode, "freedreno_kgsl")
+           || env_is(droidbridge_mesa_mode, "freedreno_kgsl")
+           || env_is(zalith_mesa_driver, "kgsl")
+           || env_is(droidbridge_mesa_driver, "kgsl");
 }
 
 void load_vulkan() {
@@ -117,12 +147,38 @@ void load_vulkan() {
 
 int pojavInitOpenGL() {
     const char *forceVsync = getenv("FORCE_VSYNC");
-    if (!strcmp(forceVsync, "true"))
+    if (forceVsync != NULL && !strcmp(forceVsync, "true"))
         pojav_environ->force_vsync = true;
 
     const char *renderer = getenv("POJAV_RENDERER");
+    if (renderer == NULL) {
+        printf("EGLBridge: POJAV_RENDERER is not set\n");
+        return 0;
+    }
 
-    load_vulkan();
+    const char* zalith_mesa_mode = getenv("ZALITH_MESA_MODE");
+    const char* droidbridge_mesa_mode = getenv("DROIDBRIDGE_MESA_MODE");
+    const char* zalith_mesa_driver = getenv("ZALITH_MESA_DRIVER");
+    const char* droidbridge_mesa_driver = getenv("DROIDBRIDGE_MESA_DRIVER");
+    bool direct_mesa_kgsl = is_direct_mesa_kgsl(
+            renderer,
+            zalith_mesa_mode,
+            droidbridge_mesa_mode,
+            zalith_mesa_driver,
+            droidbridge_mesa_driver
+    );
+
+    if (direct_mesa_kgsl) {
+        /*
+         * Direct Freedreno/KGSL Mesa should own EGL startup. Loading
+         * Vulkan/Turnip first can put the wrong graphics stack into the process
+         * before KGSL creates its display.
+         */
+        printf("OSMDroid: Skipping Vulkan loader for direct Mesa KGSL renderer.\n");
+        set_vulkan_ptr(NULL);
+    } else {
+        load_vulkan();
+    }
 
     if (!strncmp("opengles", renderer, 8))
     {
@@ -142,6 +198,26 @@ int pojavInitOpenGL() {
         load_vulkan();
         setenv("GALLIUM_DRIVER", "zink", 1);
         set_osm_bridge_tbl();
+    }
+
+    if (!strcmp(renderer, "freedreno_kgsl"))
+    {
+        printf("EGLBridge: Using Zalith Mesa freedreno_kgsl GL bridge\n");
+        setenv("ZALITH_MESA", "1", 1);
+        setenv("ZALITH_MESA_MODE", "freedreno_kgsl", 1);
+        setenv("ZALITH_MESA_DRIVER", "kgsl", 1);
+        setenv("DROIDBRIDGE_MESA", "1", 1);
+        setenv("DROIDBRIDGE_MESA_MODE", "freedreno_kgsl", 1);
+        setenv("DROIDBRIDGE_MESA_DRIVER", "kgsl", 1);
+        setenv("POJAV_RENDERER_MESA_MODE", "freedreno_kgsl", 1);
+        setenv("MESA_LOADER_DRIVER_OVERRIDE", "kgsl", 1);
+        unsetenv("GALLIUM_DRIVER");
+        setenv("ZALITH_MESA_DESKTOP_GL", "1", 1);
+        setenv("ZALITH_EGL_FORCE_DESKTOP_GL", "1", 1);
+        setenv("DROIDBRIDGE_MESA_DESKTOP_GL", "1", 1);
+        setenv("DROIDBRIDGE_EGL_FORCE_DESKTOP_GL", "1", 1);
+        pojav_environ->config_renderer = RENDERER_GL4ES;
+        set_gl_bridge_tbl();
     }
 
     if (!strcmp(renderer, "gallium_freedreno"))
@@ -293,4 +369,3 @@ EXTERNAL_API void pojavSwapInterval(int interval) {
     }
 
 }
-

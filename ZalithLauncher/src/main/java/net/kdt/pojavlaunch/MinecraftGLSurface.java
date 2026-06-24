@@ -118,6 +118,10 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
      * @param touchpad the optional cursor-emulating touchpad, used for touch event processing
      *                 when the cursor is not grabbed
      */
+    public View getSurfaceView() {
+        return mSurface;
+    }
+
     public void start(boolean isAlreadyRunning, AbstractTouchpad touchpad){
         setUpPointerCapture(touchpad);
         mInGUIProcessor.setAbstractTouchpad(touchpad);

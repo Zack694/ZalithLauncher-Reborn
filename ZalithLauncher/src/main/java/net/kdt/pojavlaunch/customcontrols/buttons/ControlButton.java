@@ -24,6 +24,7 @@ import net.kdt.pojavlaunch.MainActivity;
 import net.kdt.pojavlaunch.customcontrols.ControlData;
 import net.kdt.pojavlaunch.customcontrols.ControlLayout;
 import net.kdt.pojavlaunch.customcontrols.handleview.EditControlPopup;
+import net.kdt.pojavlaunch.recording.GameRecorder;
 
 import org.lwjgl.glfw.CallbackBridge;
 
@@ -283,6 +284,18 @@ public class ControlButton extends TextView implements ControlInterface {
                 break;
             case ControlData.SPECIALBTN_MENU:
                 mControlLayout.notifyAppMenu();
+                break;
+
+            case ControlData.SPECIALBTN_RECORDING:
+                if (isDown) MainActivity.toggleGameRecording();
+                break;
+
+            case ControlData.SPECIALBTN_RECORDING_PAUSE:
+                if (isDown) MainActivity.toggleGameRecordingPause();
+                break;
+
+            case ControlData.SPECIALBTN_VOICECHAT_MIC:
+                GameRecorder.setVoicechatMicHeld(isDown);
                 break;
         }
     }

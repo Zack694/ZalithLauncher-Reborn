@@ -20,6 +20,7 @@ public final class RecorderPrefs {
     private static final String KEY_BITRATE_KBPS = "bitrate_kbps";
     private static final String KEY_CODEC = "codec";              // "hevc" | "avc"
     private static final String KEY_RECORD_AUDIO = "record_audio";
+    private static final String KEY_RECORD_GAME_AUDIO = "record_game_audio";
     private static final String KEY_VOICECHAT_BUTTON = "voicechat_button"; // push-to-talk button
     private static final String KEY_PERFORMANCE_MODE = "performance_mode";
 
@@ -29,9 +30,10 @@ public final class RecorderPrefs {
         this.prefs = context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    /** Whether the GPU capture tee is active (must be on before the game starts). */
+    /** Whether the GPU capture tee is active. Default ON so recording can start
+     *  instantly from the menu without relaunching the game. */
     public boolean isEnabled() {
-        return prefs.getBoolean(KEY_ENABLED, false);
+        return prefs.getBoolean(KEY_ENABLED, true);
     }
 
     public void setEnabled(boolean v) {
@@ -98,6 +100,15 @@ public final class RecorderPrefs {
 
     public void setRecordAudio(boolean v) {
         prefs.edit().putBoolean(KEY_RECORD_AUDIO, v).apply();
+    }
+
+    /** Capture the game's own audio output (via AudioPlaybackCapture). */
+    public boolean isRecordGameAudio() {
+        return prefs.getBoolean(KEY_RECORD_GAME_AUDIO, true);
+    }
+
+    public void setRecordGameAudio(boolean v) {
+        prefs.edit().putBoolean(KEY_RECORD_GAME_AUDIO, v).apply();
     }
 
     /** Whether to show the Voicechat push-to-talk button. */

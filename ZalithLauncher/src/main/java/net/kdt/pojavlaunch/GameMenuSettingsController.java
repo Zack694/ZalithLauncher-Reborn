@@ -111,9 +111,11 @@ public class GameMenuSettingsController implements
         RecorderPrefs p = new RecorderPrefs(activity);
         binding.recorderEnable.setChecked(p.isEnabled());
         binding.recorderMic.setChecked(p.isRecordAudio());
+        binding.recorderGameAudio.setChecked(p.isRecordGameAudio());
         binding.recorderHevc.setChecked(p.getMimeType().toLowerCase().contains("hevc"));
         binding.recorderEnable.setOnCheckedChangeListener(this);
         binding.recorderMic.setOnCheckedChangeListener(this);
+        binding.recorderGameAudio.setOnCheckedChangeListener(this);
         binding.recorderHevc.setOnCheckedChangeListener(this);
         binding.recorderToggle.setOnClickListener(this);
 
@@ -147,29 +149,14 @@ public class GameMenuSettingsController implements
     private void onRecorderToggleClicked() {
         GameRecorder r = GameRecorder.getInstance();
         if (!r.isActive()) {
-            Toast.makeText(activity, "Enable the recorder and relaunch the game first",
-                    Toast.LENGTH_LONG).show();
+            Toast.makeText(activity, "Recorder is starting up - try again in a moment",
+                    Toast.LENGTH_SHORT).show();
             return;
         }
-        RecorderPrefs p = new RecorderPrefs(activity);
         if (!r.isRecording()) {
-            if (p.isRecordAudio() && ContextCompat.checkSelfPermission(activity,
-                    Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(activity,
-                        new String[]{Manifest.permission.RECORD_AUDIO}, REQ_RECORD_AUDIO);
-                Toast.makeText(activity, "Grant microphone, then tap Start again",
-                        Toast.LENGTH_SHORT).show();
-                return;
-            }
-            r.startRecording(activity);
-            if (p.isRecordAudio() && p.isVoicechatButton()) {
-                VoicechatButton.show(activity);
-            }
-            Toast.makeText(activity, "Recording started", Toast.LENGTH_SHORT).show();
+            activity.startRecorder();
         } else {
-            r.stopRecording();
-            VoicechatButton.hide(activity);
-            Toast.makeText(activity, "Recording saved", Toast.LENGTH_SHORT).show();
+            activity.stopRecorder();
         }
         updateRecorderToggleText();
     }
@@ -506,6 +493,8 @@ public class GameMenuSettingsController implements
             Toast.makeText(activity, "Relaunch the game to apply", Toast.LENGTH_LONG).show();
         } else if (compoundButton == binding.recorderMic) {
             new RecorderPrefs(activity).setRecordAudio(isChecked);
+        } else if (compoundButton == binding.recorderGameAudio) {
+            new RecorderPrefs(activity).setRecordGameAudio(isChecked);
         } else if (compoundButton == binding.recorderHevc) {
             new RecorderPrefs(activity).setCodec(isChecked ? "hevc" : "avc");
         }

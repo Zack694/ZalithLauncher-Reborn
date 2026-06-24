@@ -572,6 +572,65 @@ public class MainActivity extends BaseActivity implements
             } catch (IOException e) {
                 Logging.e("LoadLayout", Tools.printToString(e));
             }
+        } else if (requestCode == REQ_RECORDER_PROJECTION) {
+            com.movtery.zalithlauncher.recorder.RecorderPrefs prefs =
+                    new com.movtery.zalithlauncher.recorder.RecorderPrefs(this);
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                // The foreground service creates the projection and starts recording.
+                com.movtery.zalithlauncher.recorder.RecorderProjectionService.start(this, resultCode, data);
+            } else {
+                // Denied: record without game audio.
+                com.movtery.zalithlauncher.recorder.GameRecorder.getInstance().startRecording(this, null);
+            }
+            showVoicechatIfNeeded(prefs);
+        }
+    }
+
+    private static final int REQ_RECORDER_AUDIO_PERM = 0x5101;
+    private static final int REQ_RECORDER_PROJECTION = 0x5102;
+
+    /** Start recording from the Special Menu (handles mic permission + game-audio projection). */
+    public void startRecorder() {
+        com.movtery.zalithlauncher.recorder.GameRecorder r =
+                com.movtery.zalithlauncher.recorder.GameRecorder.getInstance();
+        if (!r.isActive() || r.isRecording()) {
+            return;
+        }
+        com.movtery.zalithlauncher.recorder.RecorderPrefs prefs =
+                new com.movtery.zalithlauncher.recorder.RecorderPrefs(this);
+
+        if (prefs.isRecordAudio() && androidx.core.content.ContextCompat.checkSelfPermission(this,
+                android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            androidx.core.app.ActivityCompat.requestPermissions(this,
+                    new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_RECORDER_AUDIO_PERM);
+            android.widget.Toast.makeText(this, "Grant microphone, then tap Start again",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (prefs.isRecordGameAudio() && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            try {
+                android.media.projection.MediaProjectionManager mpm =
+                        (android.media.projection.MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+                startActivityForResult(mpm.createScreenCaptureIntent(), REQ_RECORDER_PROJECTION);
+                return;
+            } catch (Throwable t) {
+                Logging.e("Recorder", "Projection request failed, recording without game audio: " + t);
+            }
+        }
+        r.startRecording(this, null);
+        showVoicechatIfNeeded(prefs);
+    }
+
+    public void stopRecorder() {
+        com.movtery.zalithlauncher.recorder.GameRecorder.getInstance().stopRecording();
+        com.movtery.zalithlauncher.recorder.RecorderProjectionService.stop(this);
+        com.movtery.zalithlauncher.recorder.VoicechatButton.hide(this);
+    }
+
+    private void showVoicechatIfNeeded(com.movtery.zalithlauncher.recorder.RecorderPrefs prefs) {
+        if (prefs.isRecordAudio() && prefs.isVoicechatButton()) {
+            com.movtery.zalithlauncher.recorder.VoicechatButton.show(this);
         }
     }
 

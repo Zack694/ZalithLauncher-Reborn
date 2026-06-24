@@ -101,6 +101,25 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:text="Record game audio"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+                <Switch
+                    android:id="@+id/recorder_game_audio"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/_8sdp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
                     android:text="Use HEVC (smaller files)"
                     android:textColor="@color/black_or_white"
                     tools:ignore="HardcodedText"/>

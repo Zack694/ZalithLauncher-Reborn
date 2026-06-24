@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
+import android.media.projection.MediaProjection;
 import android.opengl.GLES20;
 import android.os.Environment;
 import android.os.Handler;
@@ -94,13 +95,18 @@ public final class GameRecorder {
     }
 
     public synchronized void startRecording(Context context) {
+        startRecording(context, null);
+    }
+
+    public synchronized void startRecording(Context context, MediaProjection projection) {
         if (mRenderThread == null || mRecording) {
             return;
         }
-        boolean audio = new RecorderPrefs(context).isRecordAudio()
+        RecorderPrefs prefs = new RecorderPrefs(context);
+        boolean micEnabled = prefs.isRecordAudio()
                 && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
                 == PackageManager.PERMISSION_GRANTED;
-        mRenderThread.postStart(new RecorderPrefs(context), audio);
+        mRenderThread.postStart(prefs, projection, micEnabled);
         mRecording = true;
     }
 
@@ -195,7 +201,8 @@ public final class GameRecorder {
                         return true;
                     case MSG_START:
                         Object[] args = (Object[]) msg.obj;
-                        doStartRecording((RecorderPrefs) args[0], (Boolean) args[1]);
+                        doStartRecording((RecorderPrefs) args[0],
+                                (MediaProjection) args[1], (Boolean) args[2]);
                         return true;
                     case MSG_STOP:
                         doStopRecording();
@@ -271,9 +278,10 @@ public final class GameRecorder {
             }
         }
 
-        void postStart(RecorderPrefs prefs, boolean audio) {
+        void postStart(RecorderPrefs prefs, MediaProjection projection, boolean micEnabled) {
             if (handler != null) {
-                handler.obtainMessage(MSG_START, new Object[]{prefs, audio}).sendToTarget();
+                handler.obtainMessage(MSG_START,
+                        new Object[]{prefs, projection, micEnabled}).sendToTarget();
             }
         }
 
@@ -328,7 +336,8 @@ public final class GameRecorder {
             }
         }
 
-        private void doStartRecording(RecorderPrefs prefs, boolean audio) {
+        private void doStartRecording(RecorderPrefs prefs, MediaProjection projection,
+                                      boolean micEnabled) {
             try {
                 int targetH = align16(prefs.getHeight());
                 int targetW = align16((int) Math.round(
@@ -341,20 +350,38 @@ public final class GameRecorder {
                 lastEncodeNanos = 0;
 
                 File out = buildOutputFile(appContext);
-                muxer = new Mp4Muxer(out.getAbsolutePath(), audio ? 2 : 1);
+
+                // Build audio first so we know how many tracks the muxer will get.
+                AudioEncoder ae = null;
+                boolean wantGameAudio = projection != null && prefs.isRecordGameAudio();
+                if (micEnabled || wantGameAudio) {
+                    try {
+                        ae = new AudioEncoder(wantGameAudio ? projection : null, micEnabled);
+                        if (!ae.hasSource()) {
+                            ae.stop();
+                            ae = null;
+                        }
+                    } catch (Throwable t) {
+                        Log.e(TAG, "Audio init failed; recording video only", t);
+                        ae = null;
+                    }
+                }
+
+                int tracks = (ae != null) ? 2 : 1;
+                muxer = new Mp4Muxer(out.getAbsolutePath(), tracks);
 
                 videoEncoder = createVideoEncoder(prefs.getMimeType(),
                         targetW, targetH, bitrate, fps);
                 encoderWindow = new WindowSurface(eglCore, videoEncoder.getInputSurface(), false);
                 videoEncoder.startDraining();
 
-                if (audio) {
-                    audioEncoder = new AudioEncoder(muxer);
+                audioEncoder = ae;
+                if (audioEncoder != null) {
                     audioEncoder.setMicActive(micActive);
-                    audioEncoder.start();
+                    audioEncoder.start(muxer);
                 }
                 Log.i(TAG, "Recording -> " + out + " (" + targetW + "x" + targetH
-                        + " @" + fps + "fps, audio=" + audio + ")");
+                        + " @" + fps + "fps, audioTracks=" + tracks + ")");
             } catch (Throwable t) {
                 Log.e(TAG, "Failed to start recording", t);
                 doStopRecording();

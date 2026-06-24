@@ -173,6 +173,8 @@ public final class GameRecorder {
         private WindowSurface encoderWindow;
         private int encWidth;
         private int encHeight;
+        private long frameIntervalNanos = 0;
+        private long lastEncodeNanos = 0;
         private volatile boolean micActive = false;
 
         RenderThread(Context appContext, Surface displaySurface, int gameWidth, int gameHeight) {
@@ -309,14 +311,20 @@ public final class GameRecorder {
             blit.draw(texMatrix);
             displayWindow.swapBuffers();
 
-            // 2) Encoder (target resolution, GPU-scaled) while recording.
+            // 2) Encoder (target resolution, GPU-scaled) while recording, paced to
+            // the target FPS so a high-FPS game doesn't overload the encoder (which
+            // would back-pressure the capture queue and lag the game).
             if (encoderWindow != null && videoEncoder != null) {
-                encoderWindow.makeCurrent();
-                GLES20.glViewport(0, 0, encWidth, encHeight);
-                blit.draw(texMatrix);
-                long ts = captureTexture.getTimestamp();
-                encoderWindow.setPresentationTime(ts > 0 ? ts : System.nanoTime());
-                encoderWindow.swapBuffers();
+                long now = System.nanoTime();
+                if (frameIntervalNanos <= 0 || (now - lastEncodeNanos) >= frameIntervalNanos) {
+                    lastEncodeNanos = now;
+                    encoderWindow.makeCurrent();
+                    GLES20.glViewport(0, 0, encWidth, encHeight);
+                    blit.draw(texMatrix);
+                    long ts = captureTexture.getTimestamp();
+                    encoderWindow.setPresentationTime(ts > 0 ? ts : now);
+                    encoderWindow.swapBuffers();
+                }
             }
         }
 
@@ -329,6 +337,8 @@ public final class GameRecorder {
                 encHeight = targetH;
                 int bitrate = prefs.getBitrateKbps() * 1000;
                 int fps = prefs.getFps();
+                frameIntervalNanos = 1_000_000_000L / Math.max(1, fps);
+                lastEncodeNanos = 0;
 
                 File out = buildOutputFile(appContext);
                 muxer = new Mp4Muxer(out.getAbsolutePath(), audio ? 2 : 1);

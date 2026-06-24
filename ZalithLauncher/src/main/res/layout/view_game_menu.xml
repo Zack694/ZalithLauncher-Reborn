@@ -26,6 +26,171 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+            <!-- ===== RecordZy built-in recorder ===== -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textStyle="bold"
+                android:textColor="@color/black_or_white"
+                android:text="Recorder"
+                tools:ignore="HardcodedText"/>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/_1sdp"
+                android:background="@color/text_background_fill"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/_8sdp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Enable recorder (relaunch game)"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+                <Switch
+                    android:id="@+id/recorder_enable"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <com.movtery.zalithlauncher.ui.view.AnimTextView
+                android:id="@+id/recorder_toggle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/_8sdp"
+                android:background="@drawable/background_item"
+                android:text="Start / Stop Recording"
+                android:gravity="center_horizontal"
+                android:paddingVertical="@dimen/_12sdp"
+                android:paddingHorizontal="@dimen/_8sdp"
+                app:ripple_for_text="true"
+                tools:ignore="HardcodedText"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/_8sdp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Microphone (push-to-talk)"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+                <Switch
+                    android:id="@+id/recorder_mic"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/_8sdp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Use HEVC (smaller files)"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+                <Switch
+                    android:id="@+id/recorder_hevc"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/_8sdp"
+                android:orientation="horizontal">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Quality"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+                <TextView
+                    android:id="@+id/recorder_quality_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+            </LinearLayout>
+            <SeekBar
+                android:id="@+id/recorder_quality"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="2"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/_8sdp"
+                android:orientation="horizontal">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Frame rate"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+                <TextView
+                    android:id="@+id/recorder_fps_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+            </LinearLayout>
+            <SeekBar
+                android:id="@+id/recorder_fps"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="36"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/_8sdp"
+                android:orientation="horizontal">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Bitrate"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+                <TextView
+                    android:id="@+id/recorder_bitrate_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+            </LinearLayout>
+            <SeekBar
+                android:id="@+id/recorder_bitrate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="20"/>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/_1sdp"
+                android:layout_marginTop="@dimen/_8sdp"
+                android:background="@color/text_background_fill"/>
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

@@ -3,14 +3,23 @@ package net.kdt.pojavlaunch;
 import static net.kdt.pojavlaunch.Tools.currentDisplayMetrics;
 import static org.lwjgl.glfw.CallbackBridge.sendKeyPress;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.pm.PackageManager;
 import android.view.View;
 import android.widget.CompoundButton;
 import android.widget.SeekBar;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
+
+import com.movtery.zalithlauncher.recorder.GameRecorder;
+import com.movtery.zalithlauncher.recorder.RecorderPrefs;
+import com.movtery.zalithlauncher.recorder.VoicechatButton;
 
 import com.movtery.zalithlauncher.R;
 import com.movtery.zalithlauncher.databinding.ActivityGameBinding;
@@ -91,6 +100,83 @@ public class GameMenuSettingsController implements
         initSwitches();
         initClickListeners();
         initHotbarSpinner();
+        initRecorder();
+    }
+
+    // ===================== RecordZy recorder controls =====================
+
+    private static final int REQ_RECORD_AUDIO = 0x5EC1;
+
+    private void initRecorder() {
+        RecorderPrefs p = new RecorderPrefs(activity);
+        binding.recorderEnable.setChecked(p.isEnabled());
+        binding.recorderMic.setChecked(p.isRecordAudio());
+        binding.recorderGameAudio.setChecked(p.isRecordGameAudio());
+        binding.recorderHevc.setChecked(p.getMimeType().toLowerCase().contains("hevc"));
+        binding.recorderEnable.setOnCheckedChangeListener(this);
+        binding.recorderMic.setOnCheckedChangeListener(this);
+        binding.recorderGameAudio.setOnCheckedChangeListener(this);
+        binding.recorderHevc.setOnCheckedChangeListener(this);
+        binding.recorderToggle.setOnClickListener(this);
+
+        binding.recorderQuality.setProgress(heightToProgress(p.getHeight()));
+        binding.recorderQualityValue.setText(heightLabel(progressToHeight(binding.recorderQuality.getProgress())));
+        binding.recorderQuality.setOnSeekBarChangeListener(this);
+
+        binding.recorderFps.setProgress(Math.max(0, Math.min(36, p.getFps() - 24)));
+        binding.recorderFpsValue.setText((24 + binding.recorderFps.getProgress()) + " fps");
+        binding.recorderFps.setOnSeekBarChangeListener(this);
+
+        int mbps = Math.max(1, p.getBitrateKbps() / 1000);
+        binding.recorderBitrate.setProgress(mbps);
+        binding.recorderBitrateValue.setText(mbps + " Mbps");
+        binding.recorderBitrate.setOnSeekBarChangeListener(this);
+
+        updateRecorderToggleText();
+    }
+
+    private void updateRecorderToggleText() {
+        GameRecorder r = GameRecorder.getInstance();
+        if (!r.isActive()) {
+            binding.recorderToggle.setText("Recorder off - enable & relaunch");
+        } else if (r.isRecording()) {
+            binding.recorderToggle.setText("\u25A0 Stop Recording");
+        } else {
+            binding.recorderToggle.setText("\u25CF Start Recording");
+        }
+    }
+
+    private void onRecorderToggleClicked() {
+        GameRecorder r = GameRecorder.getInstance();
+        if (!r.isActive()) {
+            Toast.makeText(activity, "Recorder is starting up - try again in a moment",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!r.isRecording()) {
+            activity.startRecorder();
+        } else {
+            activity.stopRecorder();
+        }
+        updateRecorderToggleText();
+    }
+
+    private static int heightToProgress(int height) {
+        if (height <= 480) return 0;
+        if (height <= 720) return 1;
+        return 2;
+    }
+
+    private static int progressToHeight(int progress) {
+        switch (progress) {
+            case 0: return 480;
+            case 2: return 1080;
+            default: return 720;
+        }
+    }
+
+    private static String heightLabel(int height) {
+        return height + "p";
     }
 
     private void initState() {
@@ -284,6 +370,8 @@ public class GameMenuSettingsController implements
             MenuUtils.adjustSeekbar(binding.hotbarHeight, -1);
         } else if (view == binding.hotbarHeightAdd) {
             MenuUtils.adjustSeekbar(binding.hotbarHeight, 1);
+        } else if (view == binding.recorderToggle) {
+            onRecorderToggleClicked();
         }
     }
 
@@ -344,6 +432,24 @@ public class GameMenuSettingsController implements
             }
             MenuUtils.updateSeekbarValue(progress, binding.hotbarHeightValue, "px");
             EventBus.getDefault().post(new HotbarChangeEvent(binding.hotbarWidth.getProgress(), progress));
+        } else if (seekBar == binding.recorderQuality) {
+            int height = progressToHeight(progress);
+            if (saveValue) {
+                new RecorderPrefs(activity).setHeight(height);
+            }
+            binding.recorderQualityValue.setText(heightLabel(height));
+        } else if (seekBar == binding.recorderFps) {
+            int fps = 24 + progress;
+            if (saveValue) {
+                new RecorderPrefs(activity).setFps(fps);
+            }
+            binding.recorderFpsValue.setText(fps + " fps");
+        } else if (seekBar == binding.recorderBitrate) {
+            int mbps = Math.max(1, progress);
+            if (saveValue) {
+                new RecorderPrefs(activity).setBitrateKbps(mbps * 1000);
+            }
+            binding.recorderBitrateValue.setText(mbps + " Mbps");
         }
     }
 
@@ -382,6 +488,15 @@ public class GameMenuSettingsController implements
         } else if (compoundButton == binding.gyroInvertY) {
             AllSettings.getGyroInvertY().put(isChecked).save();
             AllStaticSettings.gyroInvertY = isChecked;
+        } else if (compoundButton == binding.recorderEnable) {
+            new RecorderPrefs(activity).setEnabled(isChecked);
+            Toast.makeText(activity, "Relaunch the game to apply", Toast.LENGTH_LONG).show();
+        } else if (compoundButton == binding.recorderMic) {
+            new RecorderPrefs(activity).setRecordAudio(isChecked);
+        } else if (compoundButton == binding.recorderGameAudio) {
+            new RecorderPrefs(activity).setRecordGameAudio(isChecked);
+        } else if (compoundButton == binding.recorderHevc) {
+            new RecorderPrefs(activity).setCodec(isChecked ? "hevc" : "avc");
         }
     }
 

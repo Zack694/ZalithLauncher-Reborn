@@ -17,7 +17,6 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -31,7 +30,6 @@
         android:appCategory="game"
         android:hasFragileUserData="true"
         android:requestLegacyExternalStorage="true"
-        android:allowAudioPlaybackCapture="true"
         android:icon="@mipmap/ic_launcher_icon_reborn"
         android:isGame="true"
         android:label="${launcher_name}"
@@ -44,11 +42,6 @@
         <meta-data
             android:name="android.max_aspect"
             android:value="ratio_float" />
-
-        <service
-            android:name="com.movtery.zalithlauncher.recorder.RecorderProjectionService"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
         <activity
             android:name="com.movtery.zalithlauncher.ui.activity.SplashActivity"
             android:exported="true"

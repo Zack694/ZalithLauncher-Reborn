@@ -713,4 +713,12 @@
     <!-- Sponsorship Related -->
     <string name="request_sponsorship_title">Support My Development</string>
     <string name="request_sponsorship_message">Most of the content in this software is developed and maintained by me alone. If you find this software helpful and are in a position to do so, I hope you will consider sponsoring me to give me more motivation to continue developing and improving it. Thank you for your support!</string>
+    <string name="recorder_started">Recording started</string>
+    <string name="recorder_paused">Recording paused</string>
+    <string name="recorder_resumed">Recording resumed</string>
+    <string name="recorder_not_running">Recorder is not running</string>
+    <string name="recorder_requires_oreo">Built-in recording requires Android 8.0 or newer</string>
+    <string name="recorder_surface_unavailable">Game surface is not ready yet</string>
+    <string name="recorder_start_failed">Could not start recording: %1$s</string>
+    <string name="recorder_saved">Recording saved: %1$s</string>
 </resources>

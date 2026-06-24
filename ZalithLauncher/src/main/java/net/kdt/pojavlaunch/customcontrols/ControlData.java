@@ -38,6 +38,9 @@ public class ControlData {
     public static final int SPECIALBTN_SCROLLUP = -7;
     public static final int SPECIALBTN_SCROLLDOWN = -8;
     public static final int SPECIALBTN_MENU = -9;
+    public static final int SPECIALBTN_RECORDING = -10;
+    public static final int SPECIALBTN_RECORDING_PAUSE = -11;
+    public static final int SPECIALBTN_VOICECHAT_MIC = -12;
 
     private static ControlData[] SPECIAL_BUTTONS;
     private static List<String> SPECIAL_BUTTON_NAME_ARRAY;
@@ -178,7 +181,10 @@ public class ControlData {
                     new ControlData(context.getString(R.string.keycode_special_mid), new int[]{SPECIALBTN_MOUSEMID}, "${margin}", "${margin}"),
                     new ControlData(context.getString(R.string.keycode_special_scrollup), new int[]{SPECIALBTN_SCROLLUP}, "${margin}", "${margin}"),
                     new ControlData(context.getString(R.string.keycode_special_scrolldown), new int[]{SPECIALBTN_SCROLLDOWN}, "${margin}", "${margin}"),
-                    new ControlData(context.getString(R.string.keycode_special_menu), new int[]{SPECIALBTN_MENU}, "${margin}", "${margin}")
+                    new ControlData(context.getString(R.string.keycode_special_menu), new int[]{SPECIALBTN_MENU}, "${margin}", "${margin}"),
+                    new ControlData(context.getString(R.string.keycode_special_recording), new int[]{SPECIALBTN_RECORDING}, "${margin}", "${margin}"),
+                    new ControlData(context.getString(R.string.keycode_special_recording_pause), new int[]{SPECIALBTN_RECORDING_PAUSE}, "${margin}", "${margin}"),
+                    new ControlData(context.getString(R.string.keycode_special_voicechat_mic), new int[]{SPECIALBTN_VOICECHAT_MIC}, "${margin}", "${margin}")
             };
         }
 

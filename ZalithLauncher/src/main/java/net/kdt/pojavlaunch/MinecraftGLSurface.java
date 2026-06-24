@@ -26,6 +26,8 @@ import androidx.annotation.NonNull;
 import com.movtery.zalithlauncher.event.single.RefreshHotbarEvent;
 import com.movtery.zalithlauncher.feature.MCOptions;
 import com.movtery.zalithlauncher.feature.log.Logging;
+import com.movtery.zalithlauncher.recorder.GameRecorder;
+import com.movtery.zalithlauncher.recorder.RecorderPrefs;
 import com.movtery.zalithlauncher.setting.AllSettings;
 import com.movtery.zalithlauncher.setting.AllStaticSettings;
 import com.movtery.zalithlauncher.ui.activity.BaseActivity;
@@ -130,7 +132,7 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
                 @Override
                 public void surfaceCreated(@NonNull SurfaceHolder holder) {
                     if(isCalled) {
-                        JREUtils.setupBridgeWindow(surfaceView.getHolder().getSurface());
+                        JREUtils.setupBridgeWindow(bridgeSurface(surfaceView.getHolder().getSurface()));
                         return;
                     }
                     isCalled = true;
@@ -160,7 +162,7 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
                 public void onSurfaceTextureAvailable(@NonNull SurfaceTexture surface, int width, int height) {
                     Surface tSurface = new Surface(surface);
                     if(isCalled) {
-                        JREUtils.setupBridgeWindow(tSurface);
+                        JREUtils.setupBridgeWindow(bridgeSurface(tSurface));
                         return;
                     }
                     isCalled = true;
@@ -412,7 +414,28 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
         }
 
         CallbackBridge.sendUpdateWindowSize(windowWidth, windowHeight);
+        if (GameRecorder.getInstance().isActive()) {
+            GameRecorder.getInstance().updateGameSize(windowWidth, windowHeight);
+        }
         EventBus.getDefault().post(new RefreshHotbarEvent());
+    }
+
+    /**
+     * When the built-in recorder ("recording support") is enabled, the native
+     * renderer is pointed at a capture surface owned by {@link GameRecorder} (which
+     * composites to this display surface). Otherwise the display surface is used
+     * directly, so default behaviour is completely unchanged.
+     */
+    private Surface bridgeSurface(Surface displaySurface){
+        try {
+            if (new RecorderPrefs(getContext()).isEnabled()) {
+                return GameRecorder.getInstance().attachDisplay(
+                        getContext(), displaySurface, windowWidth, windowHeight);
+            }
+        } catch (Throwable t) {
+            Logging.e("MGLSurface", "Recorder attach failed, using display surface directly: " + t);
+        }
+        return displaySurface;
     }
 
     private void realStart(Surface surface){
@@ -426,7 +449,7 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
         MCOptions.INSTANCE.save();
         MCOptions.INSTANCE.getMcScale();
 
-        JREUtils.setupBridgeWindow(surface);
+        JREUtils.setupBridgeWindow(bridgeSurface(surface));
 
         new Thread(() -> {
             try {

@@ -220,6 +220,8 @@ public class MainActivity extends BaseActivity implements
         binding.mainDrawerOptions.setScrimColor(Color.TRANSPARENT);
         binding.mainDrawerOptions.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED);
 
+        com.movtery.zalithlauncher.recorder.RecorderOverlay.attach(this);
+
         CallbackBridge.addGrabListener(binding.mainTouchpad);
         CallbackBridge.addGrabListener(binding.mainGameRenderView);
 
@@ -521,6 +523,12 @@ public class MainActivity extends BaseActivity implements
     protected void onDestroy() {
         launchRequested.set(false);
         LaunchGame.resetLaunchState();
+
+        try {
+            com.movtery.zalithlauncher.recorder.GameRecorder.getInstance().detach();
+            com.movtery.zalithlauncher.recorder.RecorderOverlay.detach(this);
+        } catch (Throwable ignored) {
+        }
 
         if (gameMenuSettingsController != null) {
             gameMenuSettingsController.closeSpinner();

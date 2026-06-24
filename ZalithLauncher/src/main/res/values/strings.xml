@@ -721,5 +721,4 @@
     <string name="recorder_surface_unavailable">Game surface is not ready yet</string>
     <string name="recorder_start_failed">Could not start recording: %1$s</string>
     <string name="recorder_saved">Recording saved: %1$s</string>
-    <string name="recorder_audio_permission_required">Microphone permission is needed to record voicechat audio</string>
 </resources>

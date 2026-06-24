@@ -101,6 +101,18 @@ public final class EglCore {
         return eglSurface;
     }
 
+    /** Small offscreen surface used to make the context current before any window exists. */
+    public EGLSurface createOffscreenSurface(int width, int height) {
+        int[] surfaceAttribs = {EGL14.EGL_WIDTH, width, EGL14.EGL_HEIGHT, height, EGL14.EGL_NONE};
+        EGLSurface eglSurface = EGL14.eglCreatePbufferSurface(mEglDisplay, mEglConfig,
+                surfaceAttribs, 0);
+        checkEglError("eglCreatePbufferSurface");
+        if (eglSurface == null) {
+            throw new RuntimeException("offscreen surface was null");
+        }
+        return eglSurface;
+    }
+
     public void makeCurrent(EGLSurface eglSurface) {
         if (!EGL14.eglMakeCurrent(mEglDisplay, eglSurface, eglSurface, mEglContext)) {
             throw new RuntimeException("eglMakeCurrent failed");
@@ -133,8 +145,13 @@ public final class EglCore {
             EGL14.eglMakeCurrent(mEglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE,
                     EGL14.EGL_NO_CONTEXT);
             EGL14.eglDestroyContext(mEglDisplay, mEglContext);
+            // NOTE: deliberately do NOT call eglTerminate() here. This EglCore is
+            // created and destroyed per recording session, but the EGL display
+            // (EGL_DEFAULT_DISPLAY) is shared process-wide with the native
+            // Minecraft renderer. Terminating it would tear down the game's EGL
+            // and black-screen/crash it. We only release our own thread + context;
+            // the shared display stays initialized for native.
             EGL14.eglReleaseThread();
-            EGL14.eglTerminate(mEglDisplay);
         }
         mEglDisplay = EGL14.EGL_NO_DISPLAY;
         mEglContext = EGL14.EGL_NO_CONTEXT;

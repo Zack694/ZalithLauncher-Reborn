@@ -19,7 +19,6 @@ import androidx.drawerlayout.widget.DrawerLayout;
 
 import com.movtery.zalithlauncher.recorder.GameRecorder;
 import com.movtery.zalithlauncher.recorder.RecorderPrefs;
-import com.movtery.zalithlauncher.recorder.VoicechatButton;
 
 import com.movtery.zalithlauncher.R;
 import com.movtery.zalithlauncher.databinding.ActivityGameBinding;
@@ -110,12 +109,8 @@ public class GameMenuSettingsController implements
     private void initRecorder() {
         RecorderPrefs p = new RecorderPrefs(activity);
         binding.recorderEnable.setChecked(p.isEnabled());
-        binding.recorderMic.setChecked(p.isRecordAudio());
-        binding.recorderGameAudio.setChecked(p.isRecordGameAudio());
         binding.recorderHevc.setChecked(p.getMimeType().toLowerCase().contains("hevc"));
         binding.recorderEnable.setOnCheckedChangeListener(this);
-        binding.recorderMic.setOnCheckedChangeListener(this);
-        binding.recorderGameAudio.setOnCheckedChangeListener(this);
         binding.recorderHevc.setOnCheckedChangeListener(this);
         binding.recorderToggle.setOnClickListener(this);
 
@@ -491,10 +486,6 @@ public class GameMenuSettingsController implements
         } else if (compoundButton == binding.recorderEnable) {
             new RecorderPrefs(activity).setEnabled(isChecked);
             Toast.makeText(activity, "Relaunch the game to apply", Toast.LENGTH_LONG).show();
-        } else if (compoundButton == binding.recorderMic) {
-            new RecorderPrefs(activity).setRecordAudio(isChecked);
-        } else if (compoundButton == binding.recorderGameAudio) {
-            new RecorderPrefs(activity).setRecordGameAudio(isChecked);
         } else if (compoundButton == binding.recorderHevc) {
             new RecorderPrefs(activity).setCodec(isChecked ? "hevc" : "avc");
         }

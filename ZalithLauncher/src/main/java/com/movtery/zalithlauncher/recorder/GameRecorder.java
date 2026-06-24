@@ -4,7 +4,6 @@ import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
-import android.media.projection.MediaProjection;
 import android.opengl.GLES20;
 import android.os.Environment;
 import android.os.Handler;
@@ -95,18 +94,10 @@ public final class GameRecorder {
     }
 
     public synchronized void startRecording(Context context) {
-        startRecording(context, null);
-    }
-
-    public synchronized void startRecording(Context context, MediaProjection projection) {
         if (mRenderThread == null || mRecording) {
             return;
         }
-        RecorderPrefs prefs = new RecorderPrefs(context);
-        boolean micEnabled = prefs.isRecordAudio()
-                && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                == PackageManager.PERMISSION_GRANTED;
-        mRenderThread.postStart(prefs, projection, micEnabled);
+        mRenderThread.postStart(new RecorderPrefs(context));
         mRecording = true;
     }
 
@@ -118,13 +109,7 @@ public final class GameRecorder {
         mRecording = false;
     }
 
-    /** Push-to-talk: cheap flag flip from the UI thread. */
-    public void setMicActive(boolean active) {
-        RenderThread t = mRenderThread;
-        if (t != null) {
-            t.setMicActive(active);
-        }
-    }
+    /** Push-to-talk removed: recording is video-only. */
 
     public synchronized void detach() {
         if (mRecording) {
@@ -175,13 +160,11 @@ public final class GameRecorder {
         // Recording state (render-thread only).
         private Mp4Muxer muxer;
         private VideoEncoder videoEncoder;
-        private AudioEncoder audioEncoder;
         private WindowSurface encoderWindow;
         private int encWidth;
         private int encHeight;
         private long frameIntervalNanos = 0;
         private long lastEncodeNanos = 0;
-        private volatile boolean micActive = false;
 
         RenderThread(Context appContext, Surface displaySurface, int gameWidth, int gameHeight) {
             super("RecordZy-GL");
@@ -200,9 +183,7 @@ public final class GameRecorder {
                         drawFrame();
                         return true;
                     case MSG_START:
-                        Object[] args = (Object[]) msg.obj;
-                        doStartRecording((RecorderPrefs) args[0],
-                                (MediaProjection) args[1], (Boolean) args[2]);
+                        doStartRecording((RecorderPrefs) msg.obj);
                         return true;
                     case MSG_STOP:
                         doStopRecording();
@@ -271,17 +252,9 @@ public final class GameRecorder {
             }
         }
 
-        void setMicActive(boolean active) {
-            micActive = active;
-            if (audioEncoder != null) {
-                audioEncoder.setMicActive(active);
-            }
-        }
-
-        void postStart(RecorderPrefs prefs, MediaProjection projection, boolean micEnabled) {
+        void postStart(RecorderPrefs prefs) {
             if (handler != null) {
-                handler.obtainMessage(MSG_START,
-                        new Object[]{prefs, projection, micEnabled}).sendToTarget();
+                handler.obtainMessage(MSG_START, prefs).sendToTarget();
             }
         }
 
@@ -336,8 +309,7 @@ public final class GameRecorder {
             }
         }
 
-        private void doStartRecording(RecorderPrefs prefs, MediaProjection projection,
-                                      boolean micEnabled) {
+        private void doStartRecording(RecorderPrefs prefs) {
             try {
                 int targetH = align16(prefs.getHeight());
                 int targetW = align16((int) Math.round(
@@ -350,38 +322,16 @@ public final class GameRecorder {
                 lastEncodeNanos = 0;
 
                 File out = buildOutputFile(appContext);
-
-                // Build audio first so we know how many tracks the muxer will get.
-                AudioEncoder ae = null;
-                boolean wantGameAudio = projection != null && prefs.isRecordGameAudio();
-                if (micEnabled || wantGameAudio) {
-                    try {
-                        ae = new AudioEncoder(wantGameAudio ? projection : null, micEnabled);
-                        if (!ae.hasSource()) {
-                            ae.stop();
-                            ae = null;
-                        }
-                    } catch (Throwable t) {
-                        Log.e(TAG, "Audio init failed; recording video only", t);
-                        ae = null;
-                    }
-                }
-
-                int tracks = (ae != null) ? 2 : 1;
-                muxer = new Mp4Muxer(out.getAbsolutePath(), tracks);
+                // Video-only: one track, no audio, no MediaProjection.
+                muxer = new Mp4Muxer(out.getAbsolutePath(), 1);
 
                 videoEncoder = createVideoEncoder(prefs.getMimeType(),
                         targetW, targetH, bitrate, fps);
                 encoderWindow = new WindowSurface(eglCore, videoEncoder.getInputSurface(), false);
                 videoEncoder.startDraining();
 
-                audioEncoder = ae;
-                if (audioEncoder != null) {
-                    audioEncoder.setMicActive(micActive);
-                    audioEncoder.start(muxer);
-                }
                 Log.i(TAG, "Recording -> " + out + " (" + targetW + "x" + targetH
-                        + " @" + fps + "fps, audioTracks=" + tracks + ")");
+                        + " @" + fps + "fps, video only)");
             } catch (Throwable t) {
                 Log.e(TAG, "Failed to start recording", t);
                 doStopRecording();
@@ -414,13 +364,6 @@ public final class GameRecorder {
                 } catch (Exception ignored) {
                 }
                 videoEncoder = null;
-            }
-            if (audioEncoder != null) {
-                try {
-                    audioEncoder.stop();
-                } catch (Exception ignored) {
-                }
-                audioEncoder = null;
             }
             if (muxer != null) {
                 try {

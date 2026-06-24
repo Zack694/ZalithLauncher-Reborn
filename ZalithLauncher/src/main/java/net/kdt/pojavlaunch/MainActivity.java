@@ -76,6 +76,7 @@ import net.kdt.pojavlaunch.customcontrols.keyboard.LwjglCharSender;
 import net.kdt.pojavlaunch.customcontrols.keyboard.TouchCharInput;
 import net.kdt.pojavlaunch.customcontrols.mouse.GyroControl;
 import net.kdt.pojavlaunch.prefs.LauncherPreferences;
+import net.kdt.pojavlaunch.recording.GameRecorder;
 import net.kdt.pojavlaunch.services.GameService;
 
 import org.greenrobot.eventbus.Subscribe;
@@ -99,6 +100,20 @@ public class MainActivity extends BaseActivity implements
     public static volatile ClipboardManager GLOBAL_CLIPBOARD;
     public static volatile boolean isInputStackCall;
     public static TouchCharInput touchCharInput;
+
+    public static void toggleGameRecording() {
+        MainActivity activity = sInstance;
+        if (activity != null && activity.binding != null) {
+            GameRecorder.toggleRecording(activity, activity.binding.mainGameRenderView.getSurfaceView());
+        }
+    }
+
+    public static void toggleGameRecordingPause() {
+        MainActivity activity = sInstance;
+        if (activity != null) {
+            GameRecorder.togglePause(activity);
+        }
+    }
 
     protected static View.OnGenericMotionListener motionListener = (v, event) -> false;
 

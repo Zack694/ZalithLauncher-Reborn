@@ -27,7 +27,6 @@ import com.movtery.zalithlauncher.event.single.RefreshHotbarEvent;
 import com.movtery.zalithlauncher.feature.MCOptions;
 import com.movtery.zalithlauncher.feature.log.Logging;
 import com.movtery.zalithlauncher.recorder.GameRecorder;
-import com.movtery.zalithlauncher.recorder.RecorderPrefs;
 import com.movtery.zalithlauncher.setting.AllSettings;
 import com.movtery.zalithlauncher.setting.AllStaticSettings;
 import com.movtery.zalithlauncher.ui.activity.BaseActivity;
@@ -414,26 +413,22 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
         }
 
         CallbackBridge.sendUpdateWindowSize(windowWidth, windowHeight);
-        if (GameRecorder.getInstance().isActive()) {
-            GameRecorder.getInstance().updateGameSize(windowWidth, windowHeight);
-        }
+        GameRecorder.getInstance().updateGameSize(windowWidth, windowHeight);
         EventBus.getDefault().post(new RefreshHotbarEvent());
     }
 
     /**
-     * When the built-in recorder ("recording support") is enabled, the native
-     * renderer is pointed at a capture surface owned by {@link GameRecorder} (which
-     * composites to this display surface). Otherwise the display surface is used
-     * directly, so default behaviour is completely unchanged.
+     * The native renderer always draws <b>straight to the display</b> surface, so
+     * there is zero recording overhead during normal play. We just register the
+     * live display surface with {@link GameRecorder}; recording is started on
+     * demand from the Special Menu (the recorder then briefly borrows this surface).
      */
     private Surface bridgeSurface(Surface displaySurface){
         try {
-            if (new RecorderPrefs(getContext()).isEnabled()) {
-                return GameRecorder.getInstance().attachDisplay(
-                        getContext(), displaySurface, windowWidth, windowHeight);
-            }
+            GameRecorder.getInstance().setDisplayTarget(
+                    getContext(), displaySurface, windowWidth, windowHeight);
         } catch (Throwable t) {
-            Logging.e("MGLSurface", "Recorder attach failed, using display surface directly: " + t);
+            Logging.e("MGLSurface", "Recorder setDisplayTarget failed: " + t);
         }
         return displaySurface;
     }

@@ -108,9 +108,7 @@ public class GameMenuSettingsController implements
 
     private void initRecorder() {
         RecorderPrefs p = new RecorderPrefs(activity);
-        binding.recorderEnable.setChecked(p.isEnabled());
         binding.recorderHevc.setChecked(p.getMimeType().toLowerCase().contains("hevc"));
-        binding.recorderEnable.setOnCheckedChangeListener(this);
         binding.recorderHevc.setOnCheckedChangeListener(this);
         binding.recorderToggle.setOnClickListener(this);
 
@@ -133,7 +131,7 @@ public class GameMenuSettingsController implements
     private void updateRecorderToggleText() {
         GameRecorder r = GameRecorder.getInstance();
         if (!r.isActive()) {
-            binding.recorderToggle.setText("Recorder off - enable & relaunch");
+            binding.recorderToggle.setText("Recorder unavailable (game not running)");
         } else if (r.isRecording()) {
             binding.recorderToggle.setText("\u25A0 Stop Recording");
         } else {
@@ -144,12 +142,17 @@ public class GameMenuSettingsController implements
     private void onRecorderToggleClicked() {
         GameRecorder r = GameRecorder.getInstance();
         if (!r.isActive()) {
-            Toast.makeText(activity, "Recorder is starting up - try again in a moment",
+            Toast.makeText(activity, "Recorder unavailable - the game isn't running yet",
                     Toast.LENGTH_SHORT).show();
             return;
         }
         if (!r.isRecording()) {
             activity.startRecorder();
+            if (!r.isRecording()) {
+                // Hand-off failed on this device; gameplay is unaffected.
+                Toast.makeText(activity, "Couldn't start recording on this device",
+                        Toast.LENGTH_SHORT).show();
+            }
         } else {
             activity.stopRecorder();
         }
@@ -483,9 +486,6 @@ public class GameMenuSettingsController implements
         } else if (compoundButton == binding.gyroInvertY) {
             AllSettings.getGyroInvertY().put(isChecked).save();
             AllStaticSettings.gyroInvertY = isChecked;
-        } else if (compoundButton == binding.recorderEnable) {
-            new RecorderPrefs(activity).setEnabled(isChecked);
-            Toast.makeText(activity, "Relaunch the game to apply", Toast.LENGTH_LONG).show();
         } else if (compoundButton == binding.recorderHevc) {
             new RecorderPrefs(activity).setCodec(isChecked ? "hevc" : "avc");
         }

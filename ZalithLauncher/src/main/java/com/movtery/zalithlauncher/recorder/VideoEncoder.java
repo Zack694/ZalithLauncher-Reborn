@@ -41,6 +41,13 @@ public final class VideoEncoder {
         // Constant-ish bitrate keeps file size predictable on low-end devices.
         format.setInteger(MediaFormat.KEY_BITRATE_MODE,
                 MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
+        // Best-effort priority (1) so the encoder yields to the game's GPU work
+        // instead of competing with it in realtime - keeps gameplay smooth.
+        format.setInteger(MediaFormat.KEY_PRIORITY, 1);
+        // Hint the hardware encoder to target the recording frame rate; helps the
+        // scheduler size its workload and reduces stalls that back-pressure the
+        // capture queue (which would lag the game).
+        format.setInteger(MediaFormat.KEY_OPERATING_RATE, frameRate);
 
         mEncoder = MediaCodec.createEncoderByType(mimeType);
         mEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);

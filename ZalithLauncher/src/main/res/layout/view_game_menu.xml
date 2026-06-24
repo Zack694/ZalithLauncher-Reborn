@@ -40,25 +40,6 @@
                 android:layout_height="@dimen/_1sdp"
                 android:background="@color/text_background_fill"/>
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/_8sdp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Enable recorder (relaunch game)"
-                    android:textColor="@color/black_or_white"
-                    tools:ignore="HardcodedText"/>
-                <Switch
-                    android:id="@+id/recorder_enable"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"/>
-            </LinearLayout>
-
             <com.movtery.zalithlauncher.ui.view.AnimTextView
                 android:id="@+id/recorder_toggle"
                 android:layout_width="match_parent"

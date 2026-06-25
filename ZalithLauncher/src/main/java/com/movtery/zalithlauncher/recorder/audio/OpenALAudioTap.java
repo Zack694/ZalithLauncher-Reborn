@@ -71,6 +71,50 @@ public final class OpenALAudioTap {
         return sLibLoaded ? safeGetChannels() : 0;
     }
 
+    /** Human-readable status of the last {@link #start()} attempt. */
+    public static String getStatusMessage() {
+        if (!sLibTried) {
+            return "not started";
+        }
+        if (!sLibLoaded) {
+            return "native lib failed to load";
+        }
+        int code;
+        try {
+            code = nativeGetStatus();
+        } catch (Throwable t) {
+            return "unknown";
+        }
+        switch (code) {
+            case 0: return "hook installed";
+            case 2: return "ShadowHook init failed";
+            case 3: return "OpenAL symbol not found";
+            case 4: return "inline hook failed";
+            case 5: return "out of memory";
+            default: return "code " + code;
+        }
+    }
+
+    /** How many times the hooked mixer function has run (0 = hook not firing). */
+    public static long getHookCalls() {
+        if (!sLibLoaded) return 0;
+        try {
+            return nativeGetHookCalls();
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /** Total int16 samples captured since the last start. */
+    public static long getCapturedSamples() {
+        if (!sLibLoaded) return 0;
+        try {
+            return nativeGetCapturedSamples();
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
     /**
      * Drains up to {@code out.length} interleaved int16 samples into {@code out}.
      * @return the number of samples copied (0 if none are buffered yet).
@@ -109,6 +153,12 @@ public final class OpenALAudioTap {
     private static native int nativeGetSampleRate();
 
     private static native int nativeGetChannels();
+
+    private static native int nativeGetStatus();
+
+    private static native long nativeGetHookCalls();
+
+    private static native long nativeGetCapturedSamples();
 
     private static native int nativeRead(short[] out, int maxSamples);
 }

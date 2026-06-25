@@ -55,9 +55,12 @@ alcGetIntegerv_t g_alcGetIntegerv = nullptr;
 
 bool g_shadowhookReady = false;
 bool g_hookInstalled = false;
+int g_lastError = 0; // 0 ok, 2 shadowhook init, 3 symbol not found, 4 hook failed, 5 alloc
 std::atomic<bool> g_capturing{false};
 std::atomic<int> g_sampleRate{0};
 std::atomic<int> g_channels{0};
+std::atomic<long long> g_hookCalls{0};      // times the proxy ran (hook is alive)
+std::atomic<long long> g_totalCaptured{0};  // int16 samples buffered into the ring
 
 // Lock-free single-producer (audio mixer thread) / single-consumer (Java pump
 // thread) ring buffer of interleaved int16 samples. wr/rd are free-running
@@ -91,6 +94,7 @@ void proxy_renderSamples(void *dev, void *out, uint32_t numSamples, size_t frame
     if (g_orig) {
         g_orig(dev, out, numSamples, frameStep);
     }
+    g_hookCalls.fetch_add(1, std::memory_order_relaxed);
     if (!g_capturing.load(std::memory_order_relaxed) || g_ring == nullptr) {
         return;
     }
@@ -128,6 +132,7 @@ void proxy_renderSamples(void *dev, void *out, uint32_t numSamples, size_t frame
         std::memcpy(g_ring, src + firstPart, (total - firstPart) * sizeof(int16_t));
     }
     g_wr.store(wr + total, std::memory_order_release);
+    g_totalCaptured.fetch_add(static_cast<long long>(total), std::memory_order_relaxed);
 }
 
 bool ensure_hook() {
@@ -142,6 +147,7 @@ bool ensure_hook() {
 
     void *addr = resolve_render_samples();
     if (addr == nullptr) {
+        g_lastError = 3;
         LOGW("could not resolve %s in %s", RENDER_SYM, OPENAL_SO);
         return false;
     }
@@ -150,11 +156,13 @@ bool ensure_hook() {
                                        reinterpret_cast<void **>(&g_orig));
     if (g_stub == nullptr) {
         int e = shadowhook_get_errno();
+        g_lastError = 4;
         LOGE("shadowhook_hook_func_addr failed at %p (errno=%d %s)", addr, e,
              shadowhook_to_errmsg(e));
         return false;
     }
     g_hookInstalled = true;
+    g_lastError = 0;
     LOGI("Audio tap installed at %p", addr);
     return true;
 }
@@ -174,6 +182,7 @@ Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeStart(JNIEnv
         g_ring = static_cast<int16_t *>(std::malloc(g_ringCap * sizeof(int16_t)));
         if (g_ring == nullptr) {
             g_ringCap = 0;
+            g_lastError = 5;
             return JNI_FALSE;
         }
     }
@@ -181,6 +190,8 @@ Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeStart(JNIEnv
     g_rd.store(0, std::memory_order_relaxed);
     g_sampleRate.store(0, std::memory_order_relaxed);
     g_channels.store(0, std::memory_order_relaxed);
+    g_hookCalls.store(0, std::memory_order_relaxed);
+    g_totalCaptured.store(0, std::memory_order_relaxed);
     g_capturing.store(true, std::memory_order_release);
     return JNI_TRUE;
 }
@@ -200,6 +211,25 @@ Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetSampleRat
 JNIEXPORT jint JNICALL
 Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetChannels(JNIEnv *, jclass) {
     return g_channels.load(std::memory_order_acquire);
+}
+
+// Diagnostics: 0 ok, 2 shadowhook init, 3 symbol not found, 4 hook failed, 5 alloc.
+JNIEXPORT jint JNICALL
+Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetStatus(JNIEnv *, jclass) {
+    return g_lastError;
+}
+
+// Number of times the hooked mixer function ran (proves the hook is firing).
+JNIEXPORT jlong JNICALL
+Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetHookCalls(JNIEnv *, jclass) {
+    return static_cast<jlong>(g_hookCalls.load(std::memory_order_relaxed));
+}
+
+// Total int16 samples buffered into the ring since the last start.
+JNIEXPORT jlong JNICALL
+Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetCapturedSamples(JNIEnv *,
+                                                                                       jclass) {
+    return static_cast<jlong>(g_totalCaptured.load(std::memory_order_relaxed));
 }
 
 // Copies up to maxSamples int16 samples into `out`; returns the count copied.

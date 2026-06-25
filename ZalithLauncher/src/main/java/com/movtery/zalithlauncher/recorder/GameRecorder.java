@@ -10,6 +10,7 @@ import android.os.Looper;
 import android.os.Process;
 import android.util.Log;
 import android.view.Surface;
+import android.widget.Toast;
 
 import com.movtery.zalithlauncher.recorder.egl.EglCore;
 import com.movtery.zalithlauncher.recorder.egl.WindowSurface;
@@ -150,6 +151,19 @@ public final class GameRecorder {
         }
         displaySurface = null;
         appContext = null;
+    }
+
+    private void toast(final String msg) {
+        final Context ctx = appContext;
+        if (ctx == null) {
+            return;
+        }
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show();
+            } catch (Throwable ignored) {
+            }
+        });
     }
 
     private static int align16(int value) {
@@ -373,7 +387,7 @@ public final class GameRecorder {
             int aSampleRate = 0;
             int aChannels = 0;
             if (prefs.isRecordAudio() && OpenALAudioTap.start()) {
-                long deadline = System.currentTimeMillis() + 1200;
+                long deadline = System.currentTimeMillis() + 2000;
                 while (System.currentTimeMillis() < deadline) {
                     aSampleRate = OpenALAudioTap.getSampleRate();
                     if (aSampleRate > 0) break;
@@ -415,6 +429,11 @@ public final class GameRecorder {
             Log.i(TAG, "Recording -> " + out + " (" + targetW + "x" + targetH
                     + " @" + fps + "fps, audio=" + audioOk
                     + (audioOk ? " " + aSampleRate + "Hz/" + aChannels + "ch" : "") + ")");
+
+            toast(audioOk
+                    ? "RecordZy: recording + audio (" + aSampleRate + "Hz x" + aChannels + ")"
+                    : "RecordZy: recording, NO audio (" + OpenALAudioTap.getStatusMessage()
+                            + ", hookCalls=" + OpenALAudioTap.getHookCalls() + ")");
         }
 
         private void drainTapBacklog() {
@@ -527,6 +546,8 @@ public final class GameRecorder {
 
         private void stopEncoder() {
             // Stop audio first so its tail flushes before the muxer closes.
+            long capturedSamples = OpenALAudioTap.getCapturedSamples();
+            long hookCalls = OpenALAudioTap.getHookCalls();
             audioRunning = false;
             if (audioPump != null) {
                 try {
@@ -566,6 +587,9 @@ public final class GameRecorder {
                 }
                 muxer = null;
             }
+
+            toast("RecordZy saved - audio samples: " + capturedSamples
+                    + " (hookCalls=" + hookCalls + ")");
         }
 
         private void releaseEverything() {

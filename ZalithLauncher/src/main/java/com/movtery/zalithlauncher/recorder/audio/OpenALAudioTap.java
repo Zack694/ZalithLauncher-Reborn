@@ -18,6 +18,7 @@ public final class OpenALAudioTap {
 
     private static boolean sLibLoaded = false;
     private static boolean sLibTried = false;
+    private static volatile String sLoadError = null;
 
     private OpenALAudioTap() {
     }
@@ -27,11 +28,21 @@ public final class OpenALAudioTap {
             return sLibLoaded;
         }
         sLibTried = true;
+        // Load the ShadowHook dependency explicitly first so a packaging problem
+        // is reported against the right library, then our tap.
+        try {
+            System.loadLibrary("shadowhook");
+        } catch (Throwable t) {
+            sLoadError = "shadowhook: " + t.getMessage();
+            Log.w(TAG, "libshadowhook.so load failed", t);
+        }
         try {
             System.loadLibrary("recordzytap");
             sLibLoaded = true;
         } catch (Throwable t) {
-            Log.w(TAG, "librecordzytap.so unavailable; audio capture disabled", t);
+            sLoadError = (sLoadError != null ? sLoadError + " | " : "")
+                    + "recordzytap: " + t.getMessage();
+            Log.w(TAG, "librecordzytap.so load failed", t);
             sLibLoaded = false;
         }
         return sLibLoaded;
@@ -77,7 +88,7 @@ public final class OpenALAudioTap {
             return "not started";
         }
         if (!sLibLoaded) {
-            return "native lib failed to load";
+            return "lib load failed: " + (sLoadError != null ? sLoadError : "unknown");
         }
         int code;
         try {

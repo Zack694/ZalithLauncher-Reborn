@@ -119,6 +119,8 @@ public final class GameRecorder {
         if (mRecording || displaySurface == null) {
             return;
         }
+        RecorderLog.logHeader(appContext, "start recording requested");
+        RecorderLog.log(appContext, "displaySurface set, game size " + gameWidth + "x" + gameHeight);
         RenderThread thread = new RenderThread(appContext, displaySurface,
                 gameWidth, gameHeight, new RecorderPrefs(context));
         thread.start();
@@ -126,6 +128,7 @@ public final class GameRecorder {
             // Hand-off failed (device wouldn't release/claim the display surface).
             // The thread has already reverted native to the display and torn down.
             Log.w(TAG, "Recorder failed to start; staying in normal (non-recording) mode");
+            RecorderLog.log(appContext, "RESULT: recording did NOT start (init/hand-off failed)");
             thread.quit();
             mRenderThread = null;
             mRecording = false;
@@ -267,6 +270,7 @@ public final class GameRecorder {
                 initSuccess = true;
             } catch (Throwable t) {
                 Log.e(TAG, "Recorder init failed; reverting to direct display", t);
+                RecorderLog.log(appContext, "Recorder init FAILED; reverting to direct display", t);
                 initSuccess = false;
                 // Make sure native is rendering to the display again, then clean up.
                 safeSetupBridge(displaySurface);
@@ -409,6 +413,10 @@ public final class GameRecorder {
                     Log.w(TAG, "Audio tap produced no PCM; recording video only");
                 }
             }
+            RecorderLog.log(appContext, "audio tap: ok=" + audioOk
+                    + ", status=\"" + OpenALAudioTap.getStatusMessage() + "\""
+                    + ", sampleRate=" + aSampleRate + ", channels=" + aChannels
+                    + ", hookCalls=" + OpenALAudioTap.getHookCalls());
 
             File out = buildOutputFile(appContext);
             muxer = new Mp4Muxer(out.getAbsolutePath(), audioOk ? 2 : 1);
@@ -431,6 +439,9 @@ public final class GameRecorder {
             Log.i(TAG, "Recording -> " + out + " (" + targetW + "x" + targetH
                     + " @" + fps + "fps, audio=" + audioOk
                     + (audioOk ? " " + aSampleRate + "Hz/" + aChannels + "ch" : "") + ")");
+            RecorderLog.log(appContext, "RESULT: recording started -> " + out.getName()
+                    + " (" + targetW + "x" + targetH + " @" + fps + "fps, codec="
+                    + prefs.getMimeType() + ", audio=" + audioOk + ")");
 
             toast(audioOk
                     ? "RecordZy: recording + audio (" + aSampleRate + "Hz x" + aChannels + ")"
@@ -592,6 +603,9 @@ public final class GameRecorder {
 
             toast("RecordZy saved - audio samples: " + capturedSamples
                     + " (hookCalls=" + hookCalls + ")");
+            RecorderLog.log(appContext, "STOP: audio samples captured=" + capturedSamples
+                    + ", hookCalls=" + hookCalls
+                    + ", tapStatus=\"" + OpenALAudioTap.getStatusMessage() + "\"");
         }
 
         private void releaseEverything() {

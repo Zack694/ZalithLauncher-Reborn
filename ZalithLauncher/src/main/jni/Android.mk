@@ -11,12 +11,11 @@ LOCAL_PATH := $(HERE_PATH)
 $(call import-module,prefab/bytehook)
 LOCAL_PATH := $(HERE_PATH)
 
-# ShadowHook only ships armeabi-v7a / arm64-v8a; skip it on x86/x86_64.
+# ShadowHook only ships armeabi-v7a / arm64-v8a; gate the audio tap on arm.
+# We vendor its prebuilt .so + header (recordzytap/prebuilt, recordzytap/include)
+# instead of consuming the prefab AAR, so prefab never tries (and fails) to
+# resolve a non-existent x86/x86_64 shadowhook library.
 RECORDZY_AUDIO_ABI := $(filter $(TARGET_ARCH_ABI),armeabi-v7a arm64-v8a)
-ifneq ($(RECORDZY_AUDIO_ABI),)
-$(call import-module,prefab/shadowhook)
-LOCAL_PATH := $(HERE_PATH)
-endif
 
 
 include $(CLEAR_VARS)
@@ -86,9 +85,16 @@ include $(BUILD_SHARED_LIBRARY)
 # librecordzytap.so is absent and the Java side falls back to video-only.
 ifneq ($(RECORDZY_AUDIO_ABI),)
 include $(CLEAR_VARS)
+LOCAL_MODULE := shadowhook
+LOCAL_SRC_FILES := recordzytap/prebuilt/$(TARGET_ARCH_ABI)/libshadowhook.so
+LOCAL_EXPORT_C_INCLUDES := $(HERE_PATH)/recordzytap/include
+include $(PREBUILT_SHARED_LIBRARY)
+
+include $(CLEAR_VARS)
 LOCAL_MODULE := recordzytap
 LOCAL_LDLIBS := -ldl -llog
 LOCAL_SHARED_LIBRARIES := shadowhook
+LOCAL_C_INCLUDES := $(HERE_PATH)/recordzytap/include
 LOCAL_SRC_FILES := recordzytap/recordzy_audiotap.cpp
 LOCAL_CPPFLAGS += -std=c++17
 include $(BUILD_SHARED_LIBRARY)

@@ -11,6 +11,9 @@ LOCAL_PATH := $(HERE_PATH)
 $(call import-module,prefab/bytehook)
 LOCAL_PATH := $(HERE_PATH)
 
+$(call import-module,prefab/shadowhook)
+LOCAL_PATH := $(HERE_PATH)
+
 
 include $(CLEAR_VARS)
 LOCAL_LDLIBS := -ldl -llog -landroid
@@ -71,6 +74,16 @@ LOCAL_SRC_FILES := \
     linkerhook/linkerhook.cpp \
     linkerhook/linkerns.c
 LOCAL_LDFLAGS := -z global
+include $(BUILD_SHARED_LIBRARY)
+
+
+# RecordZy audio tap: inline-hooks OpenAL-soft's mixer to capture game audio.
+include $(CLEAR_VARS)
+LOCAL_MODULE := recordzytap
+LOCAL_LDLIBS := -ldl -llog
+LOCAL_SHARED_LIBRARIES := shadowhook
+LOCAL_SRC_FILES := recordzytap/recordzy_audiotap.cpp
+LOCAL_CPPFLAGS += -std=c++17
 include $(BUILD_SHARED_LIBRARY)
 
 

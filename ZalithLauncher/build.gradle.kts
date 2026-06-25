@@ -169,7 +169,7 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            pickFirsts += listOf("**/libbytehook.so")
+            pickFirsts += listOf("**/libbytehook.so", "**/libshadowhook.so")
         }
     }
 
@@ -255,6 +255,8 @@ dependencies {
     // https://github.com/PojavLauncherTeam/exp4j
     implementation("net.sourceforge.htmlcleaner:htmlcleaner:2.6.1")
     implementation("com.bytedance:bytehook:1.0.10")
+    // Inline-hook engine for the RecordZy game-audio tap (OpenAL-soft mixer).
+    implementation("com.bytedance.android:shadowhook:1.0.10")
 
     // implementation("net.sourceforge.streamsupport:streamsupport-cfuture:1.7.0")
 

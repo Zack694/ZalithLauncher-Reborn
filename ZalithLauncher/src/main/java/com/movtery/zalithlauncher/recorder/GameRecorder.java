@@ -14,6 +14,7 @@ import android.view.Surface;
 import com.movtery.zalithlauncher.recorder.egl.EglCore;
 import com.movtery.zalithlauncher.recorder.egl.WindowSurface;
 import com.movtery.zalithlauncher.recorder.gl.TextureBlit;
+import com.movtery.zalithlauncher.recorder.audio.OpenALAudioTap;
 
 import net.kdt.pojavlaunch.utils.JREUtils;
 
@@ -204,6 +205,13 @@ public final class GameRecorder {
         private int encHeight;
         private long frameIntervalNanos = 0;
         private long lastEncodeNanos = 0;
+        private long recordStartNanos = 0;
+
+        // Audio state (game-audio tap -> AAC), present only when audio is enabled.
+        private AudioEncoder audioEncoder;
+        private Thread audioPump;
+        private volatile boolean audioRunning = false;
+        private short[] audioReadBuf;
 
         RenderThread(Context appContext, Surface displaySurface,
                      int gameWidth, int gameHeight, RecorderPrefs prefs) {
@@ -359,15 +367,83 @@ public final class GameRecorder {
             frameIntervalNanos = 1_000_000_000L / Math.max(1, fps);
             lastEncodeNanos = 0;
 
+            // Probe the game-audio tap first so we know whether to add an audio
+            // track (the muxer can't start until every expected track is added).
+            boolean audioOk = false;
+            int aSampleRate = 0;
+            int aChannels = 0;
+            if (prefs.isRecordAudio() && OpenALAudioTap.start()) {
+                long deadline = System.currentTimeMillis() + 1200;
+                while (System.currentTimeMillis() < deadline) {
+                    aSampleRate = OpenALAudioTap.getSampleRate();
+                    if (aSampleRate > 0) break;
+                    try {
+                        Thread.sleep(20);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+                aChannels = OpenALAudioTap.getChannels();
+                if (aSampleRate > 0) {
+                    if (aChannels <= 0) aChannels = 2;
+                    audioOk = true;
+                } else {
+                    OpenALAudioTap.stop();
+                    Log.w(TAG, "Audio tap produced no PCM; recording video only");
+                }
+            }
+
             File out = buildOutputFile(appContext);
-            muxer = new Mp4Muxer(out.getAbsolutePath(), 1); // video-only, single track
+            muxer = new Mp4Muxer(out.getAbsolutePath(), audioOk ? 2 : 1);
 
             videoEncoder = createVideoEncoder(prefs.getMimeType(), targetW, targetH, bitrate, fps);
             encoderWindow = new WindowSurface(eglCore, videoEncoder.getInputSurface(), false);
+
+            // Common A/V time anchor: video PTS = nanoTime - start; audio PTS is
+            // derived from its sample count (also starting at 0).
+            recordStartNanos = System.nanoTime();
             videoEncoder.startDraining();
 
+            if (audioOk) {
+                drainTapBacklog(); // drop silence/lead-in captured during probing
+                audioEncoder = new AudioEncoder(aSampleRate, aChannels, 128_000, muxer);
+                audioEncoder.startDraining();
+                startAudioPump();
+            }
+
             Log.i(TAG, "Recording -> " + out + " (" + targetW + "x" + targetH
-                    + " @" + fps + "fps, video only)");
+                    + " @" + fps + "fps, audio=" + audioOk
+                    + (audioOk ? " " + aSampleRate + "Hz/" + aChannels + "ch" : "") + ")");
+        }
+
+        private void drainTapBacklog() {
+            short[] tmp = new short[4096];
+            int guard = 0;
+            while (OpenALAudioTap.read(tmp, tmp.length) > 0 && guard++ < 4096) {
+                // discard
+            }
+        }
+
+        private void startAudioPump() {
+            audioRunning = true;
+            audioReadBuf = new short[8192];
+            audioPump = new Thread(() -> {
+                while (audioRunning) {
+                    int n = OpenALAudioTap.read(audioReadBuf, audioReadBuf.length);
+                    if (n > 0) {
+                        audioEncoder.feed(audioReadBuf, n);
+                    } else {
+                        try {
+                            Thread.sleep(5);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                }
+            }, "RecordZy-AudioPump");
+            audioPump.start();
         }
 
         private VideoEncoder createVideoEncoder(String mime, int w, int h, int bitrate, int fps)
@@ -411,8 +487,8 @@ public final class GameRecorder {
                     encoderWindow.makeCurrent();
                     GLES20.glViewport(0, 0, encWidth, encHeight);
                     blit.draw(texMatrix);
-                    long ts = captureTexture.getTimestamp();
-                    encoderWindow.setPresentationTime(ts > 0 ? ts : now);
+                    long ptsNanos = now - recordStartNanos;
+                    encoderWindow.setPresentationTime(ptsNanos > 0 ? ptsNanos : 0);
                     encoderWindow.swapBuffers();
                 }
             }
@@ -450,6 +526,25 @@ public final class GameRecorder {
         }
 
         private void stopEncoder() {
+            // Stop audio first so its tail flushes before the muxer closes.
+            audioRunning = false;
+            if (audioPump != null) {
+                try {
+                    audioPump.join(600);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+                audioPump = null;
+            }
+            OpenALAudioTap.stop();
+            if (audioEncoder != null) {
+                try {
+                    audioEncoder.stop();
+                } catch (Exception ignored) {
+                }
+                audioEncoder = null;
+            }
+
             if (encoderWindow != null) {
                 try {
                     encoderWindow.release();

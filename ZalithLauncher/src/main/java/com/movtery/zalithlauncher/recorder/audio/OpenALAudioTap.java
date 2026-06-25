@@ -28,20 +28,15 @@ public final class OpenALAudioTap {
             return sLibLoaded;
         }
         sLibTried = true;
-        // Load the ShadowHook dependency explicitly first so a packaging problem
-        // is reported against the right library, then our tap.
-        try {
-            System.loadLibrary("shadowhook");
-        } catch (Throwable t) {
-            sLoadError = "shadowhook: " + t.getMessage();
-            Log.w(TAG, "libshadowhook.so load failed", t);
-        }
+        // Do NOT load libshadowhook.so explicitly: its JNI_OnLoad needs ShadowHook's
+        // Java class (which we don't ship) and would return JNI_ERR. It loads fine
+        // as a dependency of librecordzytap.so (its JNI_OnLoad isn't invoked for a
+        // dependency), and we drive its C API directly from native code.
         try {
             System.loadLibrary("recordzytap");
             sLibLoaded = true;
         } catch (Throwable t) {
-            sLoadError = (sLoadError != null ? sLoadError + " | " : "")
-                    + "recordzytap: " + t.getMessage();
+            sLoadError = "recordzytap: " + t.getMessage();
             Log.w(TAG, "librecordzytap.so load failed", t);
             sLibLoaded = false;
         }

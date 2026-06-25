@@ -86,7 +86,9 @@ include $(BUILD_SHARED_LIBRARY)
 ifneq ($(RECORDZY_AUDIO_ABI),)
 include $(CLEAR_VARS)
 LOCAL_MODULE := shadowhook
-LOCAL_SRC_FILES := recordzytap/prebuilt/$(TARGET_ARCH_ABI)/libshadowhook.so
+# Single source of truth lives in jniLibs/ (so AGP reliably packages it into the
+# APK); referenced here only for link-time symbol resolution.
+LOCAL_SRC_FILES := ../jniLibs/$(TARGET_ARCH_ABI)/libshadowhook.so
 LOCAL_EXPORT_C_INCLUDES := $(HERE_PATH)/recordzytap/include
 include $(PREBUILT_SHARED_LIBRARY)
 

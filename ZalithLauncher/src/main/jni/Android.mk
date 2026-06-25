@@ -11,8 +11,12 @@ LOCAL_PATH := $(HERE_PATH)
 $(call import-module,prefab/bytehook)
 LOCAL_PATH := $(HERE_PATH)
 
+# ShadowHook only ships armeabi-v7a / arm64-v8a; skip it on x86/x86_64.
+RECORDZY_AUDIO_ABI := $(filter $(TARGET_ARCH_ABI),armeabi-v7a arm64-v8a)
+ifneq ($(RECORDZY_AUDIO_ABI),)
 $(call import-module,prefab/shadowhook)
 LOCAL_PATH := $(HERE_PATH)
+endif
 
 
 include $(CLEAR_VARS)
@@ -78,6 +82,9 @@ include $(BUILD_SHARED_LIBRARY)
 
 
 # RecordZy audio tap: inline-hooks OpenAL-soft's mixer to capture game audio.
+# Only built for arm ABIs (ShadowHook has no x86/x86_64 library). On other ABIs
+# librecordzytap.so is absent and the Java side falls back to video-only.
+ifneq ($(RECORDZY_AUDIO_ABI),)
 include $(CLEAR_VARS)
 LOCAL_MODULE := recordzytap
 LOCAL_LDLIBS := -ldl -llog
@@ -85,6 +92,7 @@ LOCAL_SHARED_LIBRARIES := shadowhook
 LOCAL_SRC_FILES := recordzytap/recordzy_audiotap.cpp
 LOCAL_CPPFLAGS += -std=c++17
 include $(BUILD_SHARED_LIBRARY)
+endif
 
 
 include $(CLEAR_VARS)

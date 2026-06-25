@@ -416,7 +416,8 @@ public final class GameRecorder {
             RecorderLog.log(appContext, "audio tap: ok=" + audioOk
                     + ", status=\"" + OpenALAudioTap.getStatusMessage() + "\""
                     + ", sampleRate=" + aSampleRate + ", channels=" + aChannels
-                    + ", hookCalls=" + OpenALAudioTap.getHookCalls());
+                    + ", hookCalls=" + OpenALAudioTap.getHookCalls()
+                    + ", diag=" + OpenALAudioTap.getDiag());
 
             File out = buildOutputFile(appContext);
             muxer = new Mp4Muxer(out.getAbsolutePath(), audioOk ? 2 : 1);

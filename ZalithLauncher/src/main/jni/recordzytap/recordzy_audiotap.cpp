@@ -67,6 +67,7 @@ std::atomic<int> g_sampleRate{0};
 std::atomic<int> g_channels{0};
 std::atomic<long long> g_hookCalls{0};      // times the proxy ran (hook is alive)
 std::atomic<long long> g_totalCaptured{0};  // int16 samples buffered into the ring
+char g_diag[1024] = {0};                     // human-readable resolution diagnostics
 
 // Lock-free single-producer (audio mixer thread) / single-consumer (Java pump
 // thread) ring buffer of interleaved int16 samples. wr/rd are free-running
@@ -96,9 +97,13 @@ bool find_module(const char *soname, uintptr_t *base, char *pathOut, size_t path
         char *p = path;
         while (*p == ' ') p++;
         if (p[0] != '/') continue;
-        // Match the basename (ignore any " (deleted)" suffix the kernel appends).
-        if (std::strstr(p, "/libopenal.so") == nullptr) continue;
-        if (std::strstr(p, soname) == nullptr) continue;
+        const char *bn = std::strrchr(p, '/');
+        bn = bn ? bn + 1 : p;
+        // Match any mapped library whose basename contains "openal"
+        // (libopenal.so, libopenal_soft.so, ...).
+        if (std::strstr(bn, "openal") == nullptr && std::strstr(bn, "OpenAL") == nullptr) {
+            continue;
+        }
         if (off != 0) continue; // the mapping of the ELF header (file offset 0)
         *base = start;
         // Copy just the path, dropping a trailing " (deleted)" if present.
@@ -111,6 +116,34 @@ bool find_module(const char *soname, uintptr_t *base, char *pathOut, size_t path
     }
     std::fclose(f);
     return found;
+}
+
+// Dump every /proc/self/maps line mentioning "openal" into g_diag, so we can
+// see how (and whether) the game's OpenAL is actually mapped.
+void diag_scan_maps() {
+    FILE *f = std::fopen("/proc/self/maps", "r");
+    if (!f) {
+        std::snprintf(g_diag, sizeof(g_diag), "maps: open failed");
+        return;
+    }
+    char line[1024];
+    size_t len = 0;
+    int count = 0;
+    g_diag[0] = '\0';
+    while (std::fgets(line, sizeof(line), f)) {
+        if (std::strstr(line, "openal") == nullptr && std::strstr(line, "OpenAL") == nullptr) {
+            continue;
+        }
+        size_t l = std::strlen(line);
+        if (l && line[l - 1] == '\n') line[l - 1] = '\0';
+        int w = std::snprintf(g_diag + len, sizeof(g_diag) - len, "{%s} ", line);
+        if (w > 0) len += (size_t) w;
+        if (len >= sizeof(g_diag) - 1 || ++count >= 5) break;
+    }
+    std::fclose(f);
+    if (count == 0) {
+        std::snprintf(g_diag, sizeof(g_diag), "no 'openal' mapping in /proc/self/maps");
+    }
 }
 
 // Look up a symbol's virtual address in an ELF file's .symtab or .dynsym.
@@ -158,7 +191,10 @@ void *resolve_render_samples() {
     if (find_module(OPENAL_SO, &base, path, sizeof(path))) {
         uintptr_t rv = elf_sym_value(path, RENDER_SYM);
         if (rv == 0) {
-            LOGW("symbol %s not found in %s", RENDER_SYM, path);
+            std::snprintf(g_diag, sizeof(g_diag),
+                          "found %s base=%p but symbol %s not in symtab/dynsym (stripped? 32-bit?)",
+                          path, reinterpret_cast<void *>(base), RENDER_SYM);
+            LOGW("%s", g_diag);
             return nullptr;
         }
         if (g_alcGetIntegerv == nullptr) {
@@ -167,8 +203,9 @@ void *resolve_render_samples() {
                 g_alcGetIntegerv = reinterpret_cast<alcGetIntegerv_t>(base + av);
             }
         }
-        LOGI("Resolved %s via maps: base=%p +0x%lx", OPENAL_SO,
-             reinterpret_cast<void *>(base), (unsigned long) rv);
+        std::snprintf(g_diag, sizeof(g_diag), "ok: %s base=%p +0x%lx", path,
+                      reinterpret_cast<void *>(base), (unsigned long) rv);
+        LOGI("%s", g_diag);
         return reinterpret_cast<void *>(base + rv);
     }
 
@@ -182,9 +219,14 @@ void *resolve_render_samples() {
                     shadowhook_dlsym(handle, "alcGetIntegerv"));
         }
         shadowhook_dlclose(handle);
-        return addr;
+        if (addr != nullptr) {
+            std::snprintf(g_diag, sizeof(g_diag), "ok via shadowhook_dlopen");
+            return addr;
+        }
     }
-    LOGW("%s not found in /proc/self/maps or namespace", OPENAL_SO);
+    // Nothing worked: record how OpenAL appears in the process for diagnosis.
+    diag_scan_maps();
+    LOGW("resolve failed: %s", g_diag);
     return nullptr;
 }
 
@@ -337,6 +379,12 @@ JNIEXPORT jlong JNICALL
 Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetCapturedSamples(JNIEnv *,
                                                                                        jclass) {
     return static_cast<jlong>(g_totalCaptured.load(std::memory_order_relaxed));
+}
+
+// Human-readable resolution diagnostics (which library/path, or the maps dump).
+JNIEXPORT jstring JNICALL
+Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetDiag(JNIEnv *env, jclass) {
+    return env->NewStringUTF(g_diag);
 }
 
 // Copies up to maxSamples int16 samples into `out`; returns the count copied.

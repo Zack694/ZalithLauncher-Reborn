@@ -171,6 +171,14 @@ bool ensure_hook() {
 
 extern "C" {
 
+// Provide our own JNI_OnLoad so that loading librecordzytap.so does NOT end up
+// invoking libshadowhook.so's JNI_OnLoad (resolved through the dependency),
+// which returns JNI_ERR because we vendor only the .so, not ShadowHook's Java
+// class. ShadowHook's C core (shadowhook_init / hook) needs no Java side.
+JNIEXPORT jint JNI_OnLoad(JavaVM *, void *) {
+    return JNI_VERSION_1_6;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeStart(JNIEnv *, jclass) {
     if (!ensure_hook()) {

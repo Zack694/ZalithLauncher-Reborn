@@ -383,10 +383,12 @@ public final class GameRecorder {
 
             // Probe the game-audio tap first so we know whether to add an audio
             // track (the muxer can't start until every expected track is added).
+            // Always attempt it (no stale-pref gate); falls back to video-only
+            // if the tap can't capture.
             boolean audioOk = false;
             int aSampleRate = 0;
             int aChannels = 0;
-            if (prefs.isRecordAudio() && OpenALAudioTap.start()) {
+            if (OpenALAudioTap.start()) {
                 long deadline = System.currentTimeMillis() + 2000;
                 while (System.currentTimeMillis() < deadline) {
                     aSampleRate = OpenALAudioTap.getSampleRate();

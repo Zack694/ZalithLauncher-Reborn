@@ -57,6 +57,12 @@ public final class VideoEncoder {
             } catch (Throwable ignored) {
             }
         }
+        // No B-frames: they add reorder latency and encode cost for no benefit in
+        // a real-time screen capture. Guarded - not every encoder accepts it.
+        try {
+            format.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0);
+        } catch (Throwable ignored) {
+        }
 
         mEncoder = MediaCodec.createEncoderByType(mimeType);
         mEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);

@@ -116,8 +116,8 @@ public class GameMenuSettingsController implements
         binding.recorderQualityValue.setText(heightLabel(progressToHeight(binding.recorderQuality.getProgress())));
         binding.recorderQuality.setOnSeekBarChangeListener(this);
 
-        binding.recorderFps.setProgress(Math.max(0, Math.min(36, p.getFps() - 24)));
-        binding.recorderFpsValue.setText((24 + binding.recorderFps.getProgress()) + " fps");
+        binding.recorderFps.setProgress(Math.max(0, Math.min(60, p.getFps() - 30)));
+        binding.recorderFpsValue.setText((30 + binding.recorderFps.getProgress()) + " fps");
         binding.recorderFps.setOnSeekBarChangeListener(this);
 
         int mbps = Math.max(1, p.getBitrateKbps() / 1000);
@@ -442,7 +442,7 @@ public class GameMenuSettingsController implements
             }
             binding.recorderQualityValue.setText(heightLabel(height));
         } else if (seekBar == binding.recorderFps) {
-            int fps = 24 + progress;
+            int fps = 30 + progress;
             if (saveValue) {
                 new RecorderPrefs(activity).setFps(fps);
             }

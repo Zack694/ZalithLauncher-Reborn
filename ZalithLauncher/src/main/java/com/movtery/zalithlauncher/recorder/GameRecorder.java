@@ -599,14 +599,39 @@ public final class GameRecorder {
             //    back-pressure the capture queue (which would lag the game).
             if (encoderWindow != null && videoEncoder != null) {
                 long now = System.nanoTime();
-                if (frameIntervalNanos <= 0 || (now - lastEncodeNanos) >= frameIntervalNanos) {
-                    lastEncodeNanos = now;
+                boolean encode;
+                if (frameIntervalNanos <= 0 || lastEncodeNanos == 0) {
+                    // Unlimited, or first frame: always encode and anchor cadence.
+                    encode = true;
+                } else {
+                    // Fixed-interval accumulator (NOT "lastEncode = now"). A naive
+                    // >= threshold drops a frame whenever the source is only a little
+                    // faster than the target, and the following frame then arrives
+                    // too soon to qualify - aliasing a 60-72fps game down to ~30-36.
+                    // Accepting frames up to 1/8 interval early absorbs jitter and
+                    // keeps the captured rate locked to the real target.
+                    long tolerance = frameIntervalNanos / 8;
+                    encode = (now - lastEncodeNanos) >= (frameIntervalNanos - tolerance);
+                }
+                if (encode) {
                     encoderWindow.makeCurrent();
                     GLES20.glViewport(0, 0, encWidth, encHeight);
                     blit.draw(texMatrix);
                     long ptsNanos = now - recordStartNanos;
                     encoderWindow.setPresentationTime(ptsNanos > 0 ? ptsNanos : 0);
                     encoderWindow.swapBuffers();
+
+                    if (frameIntervalNanos <= 0 || lastEncodeNanos == 0) {
+                        lastEncodeNanos = now;
+                    } else {
+                        // Advance by exactly one interval to hold the cadence; if the
+                        // game is slower than target (or we stalled), resync so the
+                        // deadline can't fall arbitrarily far behind.
+                        lastEncodeNanos += frameIntervalNanos;
+                        if (now - lastEncodeNanos > frameIntervalNanos) {
+                            lastEncodeNanos = now;
+                        }
+                    }
                 }
             }
         }

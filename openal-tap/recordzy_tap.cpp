@@ -22,6 +22,13 @@ std::atomic<int> g_rate{0};
 std::atomic<int> g_chans{0};
 std::atomic<int> g_active{0};
 
+// Device locking: capture only the first OpenAL device that renders after
+// start, so additional contexts (e.g. a voice-chat mod's own OpenAL output)
+// can't double up the captured stream.
+const void *g_lockedDev = nullptr;
+const void *g_seenDevs[8] = {nullptr};
+std::atomic<int> g_devCount{0};
+
 inline int16_t floatToS16(float f) {
     if (f >= 1.0f) return 32767;
     if (f <= -1.0f) return -32768;
@@ -36,15 +43,37 @@ RZ_EXPORT void recordzy_tap_set_active(int active) {
     if (active) {
         g_wr.store(0, std::memory_order_relaxed);
         g_rd.store(0, std::memory_order_relaxed);
+        g_lockedDev = nullptr;
+        g_devCount.store(0, std::memory_order_relaxed);
+        for (int i = 0; i < 8; i++) g_seenDevs[i] = nullptr;
     }
     g_active.store(active, std::memory_order_release);
 }
 
-RZ_EXPORT void recordzy_tap_feed(const void *pcm, unsigned numSamples, unsigned frameStep,
-                                 unsigned freq, unsigned bytesPerSample, int isFloat) {
+RZ_EXPORT void recordzy_tap_feed(const void *dev, const void *pcm, unsigned numSamples,
+                                 unsigned frameStep, unsigned freq, unsigned bytesPerSample,
+                                 int isFloat) {
     if (!g_active.load(std::memory_order_relaxed) || pcm == nullptr || numSamples == 0) {
         return;
     }
+
+    // Track distinct devices (for diagnostics) and lock onto the first one.
+    int count = g_devCount.load(std::memory_order_relaxed);
+    bool known = false;
+    for (int i = 0; i < count && i < 8; i++) {
+        if (g_seenDevs[i] == dev) { known = true; break; }
+    }
+    if (!known && count < 8) {
+        g_seenDevs[count] = dev;
+        g_devCount.store(count + 1, std::memory_order_relaxed);
+    }
+    if (g_lockedDev == nullptr) {
+        g_lockedDev = dev;
+    }
+    if (dev != g_lockedDev) {
+        return; // a different OpenAL output -> ignore so we don't double up
+    }
+
     unsigned ch = frameStep ? frameStep : 2u;
     g_rate.store(static_cast<int>(freq), std::memory_order_relaxed);
     g_chans.store(static_cast<int>(ch), std::memory_order_relaxed);
@@ -109,6 +138,10 @@ RZ_EXPORT int recordzy_tap_samplerate(void) {
 
 RZ_EXPORT int recordzy_tap_channels(void) {
     return g_chans.load(std::memory_order_acquire);
+}
+
+RZ_EXPORT int recordzy_tap_device_count(void) {
+    return g_devCount.load(std::memory_order_acquire);
 }
 
 } // extern "C"

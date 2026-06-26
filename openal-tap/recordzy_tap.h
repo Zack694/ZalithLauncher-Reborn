@@ -15,14 +15,21 @@ extern "C" {
 #endif
 
 // Called from OpenAL's mixer with freshly rendered device-format PCM.
-void recordzy_tap_feed(const void *pcm, unsigned numSamples, unsigned frameStep,
-                       unsigned freq, unsigned bytesPerSample, int isFloat);
+// `dev` identifies the source ALCdevice/DeviceBase so the tap can lock onto a
+// single device and ignore any other contexts (which would otherwise double up
+// the captured stream).
+void recordzy_tap_feed(const void *dev, const void *pcm, unsigned numSamples,
+                       unsigned frameStep, unsigned freq, unsigned bytesPerSample, int isFloat);
 
 // Drain up to maxSamples interleaved int16 samples; returns the count copied.
 int recordzy_tap_read(short *out, int maxSamples);
 
 int recordzy_tap_samplerate(void);
 int recordzy_tap_channels(void);
+
+// Number of distinct render devices/contexts seen since the last start (>1 means
+// the process has multiple OpenAL outputs; the tap only captures the first).
+int recordzy_tap_device_count(void);
 
 // Enable/disable capture (and reset the ring on enable). Idle cost when off is
 // a single relaxed atomic load per mixer call.

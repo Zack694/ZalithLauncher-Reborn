@@ -416,6 +416,7 @@ public final class GameRecorder {
             RecorderLog.log(appContext, "audio tap: ok=" + audioOk
                     + ", status=\"" + OpenALAudioTap.getStatusMessage() + "\""
                     + ", sampleRate=" + aSampleRate + ", channels=" + aChannels
+                    + ", devices=" + OpenALAudioTap.getDeviceCount()
                     + ", hookCalls=" + OpenALAudioTap.getHookCalls()
                     + ", diag=" + OpenALAudioTap.getDiag());
 
@@ -509,19 +510,19 @@ public final class GameRecorder {
                     }
 
                     long desiredOut = (long) (elapsed * outRate);
+                    int win = (int) Math.round(ratio);   // anti-alias window (~2 when 2x)
+                    if (win < 1) win = 1;
                     int produced = 0;
-                    while (outFrames < desiredOut && pos + 1.0 < pendFrames) {
+                    while (outFrames < desiredOut && pos + win < pendFrames) {
                         int i0 = (int) pos;
-                        double frac = pos - i0;
-                        int base0 = i0 * ch;
-                        int base1 = base0 + ch;
                         for (int c = 0; c < ch; c++) {
-                            int s0 = pend[base0 + c];
-                            int s1 = pend[base1 + c];
-                            int v = (int) (s0 + (s1 - s0) * frac);
-                            if (v > 32767) v = 32767;
-                            else if (v < -32768) v = -32768;
-                            outBuf[produced * ch + c] = (short) v;
+                            // Average `win` input samples (a simple low-pass) before
+                            // decimating, so downsampling doesn't alias ("deep fried").
+                            int acc = 0;
+                            for (int k = 0; k < win; k++) {
+                                acc += pend[(i0 + k) * ch + c];
+                            }
+                            outBuf[produced * ch + c] = (short) (acc / win);
                         }
                         produced++;
                         pos += ratio;
@@ -681,6 +682,7 @@ public final class GameRecorder {
                     + " (hookCalls=" + hookCalls + ")");
             RecorderLog.log(appContext, "STOP: audio samples captured=" + capturedSamples
                     + ", hookCalls=" + hookCalls
+                    + ", devices=" + OpenALAudioTap.getDeviceCount()
                     + ", tapStatus=\"" + OpenALAudioTap.getStatusMessage() + "\"");
         }
 

@@ -5,7 +5,10 @@
 #include <cstdlib>
 #include <cstring>
 
-#define RZ_EXPORT __attribute__((visibility("default")))
+// used + retain: keep these from being dropped by the compiler or the linker's
+// --gc-sections (they have no internal callers, only external resolvers), and
+// visibility default + the libopenal.version edit get them into .dynsym.
+#define RZ_EXPORT __attribute__((visibility("default"), used, retain))
 
 namespace {
 

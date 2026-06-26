@@ -287,6 +287,19 @@ and back-pressures the GL compositor less. CI green on all ABIs. Opened PR #33.
 
 ------------------------------------------------------------
 
+[Turn 21]
+User: Quick question, why do I have to manually calibrate it? [Then: Yes auto]
+
+Claude: Explained the lead comes from device-specific audio output latency
+(audio is buffered ahead of when it's heard; worse on Bluetooth). Implemented
+AUTO-calibration: the OpenAL tap now reports the device's output buffer latency
+(BufferSize/Frequency, exported as recordzy_tap_latency_ms), and the recorder
+uses it as the audio delay automatically. The slider now defaults to 0 = Auto;
+a positive value overrides (useful for Bluetooth). OpenAL rebuilt + APK green on
+all ABIs. Opened PR #34 (supersedes #33).
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -304,8 +317,12 @@ KEY OUTCOMES / STATE
   * Multi-device MIXER: sum all OpenAL devices into one real-time stream (fixes
     the no-audio caused by locking to the silent device) - PR #32. CONFIRMED
     WORKING by the user (clean, in-sync, no glitches).
-  * Adjustable A/V-sync audio-delay slider (default 90ms) + MediaCodec
-    low-latency video encoding - PR #33.
+  * Adjustable A/V-sync audio-delay slider + MediaCodec low-latency video
+    encoding - PR #33.
+  * AUTO A/V sync: tap reports device audio output latency, recorder applies it
+    automatically (slider 0 = Auto, positive = manual override) - PR #34.
+- Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
+  A/V offset now auto-calibrated.
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)
   video, MP4 via MediaMuxer.
   * Diagnostics: on-screen toasts + recordzy-log.txt next to the recordings.

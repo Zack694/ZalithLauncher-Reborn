@@ -31,6 +31,14 @@ int recordzy_tap_channels(void);
 // the process has multiple OpenAL outputs; the tap only captures the first).
 int recordzy_tap_device_count(void);
 
+// Records a device's output buffer latency (frames + rate); the tap keeps the
+// largest seen. Used to auto-calibrate the A/V audio delay.
+void recordzy_tap_set_latency(unsigned bufferFrames, unsigned freq);
+
+// Estimated audio output latency in milliseconds (how far ahead audio is
+// buffered before it's heard), or 0 if unknown.
+int recordzy_tap_latency_ms(void);
+
 // Enable/disable capture (and reset the ring on enable). Idle cost when off is
 // a single relaxed atomic load per mixer call.
 void recordzy_tap_set_active(int active);

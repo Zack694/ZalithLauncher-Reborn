@@ -84,11 +84,10 @@ public final class RecorderPrefs {
 
     private static final String KEY_AUDIO_DELAY_MS = "audio_delay_ms";
 
-    /** How much to delay the audio track to line it up with video. OpenAL renders
-     *  audio slightly ahead of when it's heard, so the captured audio tends to be
-     *  a bit ahead of the video; this shifts it back. Default 90 ms, 0-500 ms. */
+    /** Audio delay (A/V sync) in ms. 0 = AUTO (use the measured audio output
+     *  latency). A positive value overrides with a fixed delay. Range 0-500. */
     public int getAudioDelayMs() {
-        return Math.max(0, Math.min(500, prefs.getInt(KEY_AUDIO_DELAY_MS, 90)));
+        return Math.max(0, Math.min(500, prefs.getInt(KEY_AUDIO_DELAY_MS, 0)));
     }
 
     public void setAudioDelayMs(int v) {

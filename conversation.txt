@@ -259,6 +259,20 @@ ABIs. Opened PR #31.
 
 ------------------------------------------------------------
 
+[Turn 19]
+User: Now there isn't any audio on the video at all. (log) devices=2,
+audio samples captured=3,287,040 over ~34s (= 1x now). [Then: Continue]
+
+Claude: devices=2 confirmed the multi-output theory, and locking dropped the
+rate to 1x - but it locked onto the SILENT secondary device, so the video had no
+audio. Replaced device-locking with a proper multi-device MIXER: sum every
+OpenAL device's PCM onto a shared timeline (aligned frames, ~25ms lag), so the
+recording contains the game audio (and any other context like voice chat) as one
+real-time 1x stream - no wrong-device silence, no 2x, no resampling artifacts.
+OpenAL rebuilt + APK built green on all ABIs. Opened PR #32.
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -273,6 +287,8 @@ KEY OUTCOMES / STATE
   * Anti-alias (averaging) downsample to fix "deep fried" audio - PR #30.
   * Lock the tap to a single OpenAL device (ignore extra contexts) to fix the 2x
     capture + high-pitch/crackle; adds device-count diagnostics - PR #31.
+  * Multi-device MIXER: sum all OpenAL devices into one real-time stream (fixes
+    the no-audio caused by locking to the silent device) - PR #32.
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)
   video, MP4 via MediaMuxer.
   * Diagnostics: on-screen toasts + recordzy-log.txt next to the recordings.

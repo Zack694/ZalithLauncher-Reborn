@@ -434,7 +434,7 @@ public final class GameRecorder {
                 drainTapBacklog(); // drop silence/lead-in captured during probing
                 audioEncoder = new AudioEncoder(aSampleRate, aChannels, 128_000, muxer);
                 audioEncoder.startDraining();
-                startAudioPump();
+                startAudioPump(aChannels, aSampleRate);
             }
 
             Log.i(TAG, "Recording -> " + out + " (" + targetW + "x" + targetH
@@ -458,22 +458,36 @@ public final class GameRecorder {
             }
         }
 
-        private void startAudioPump() {
+        private void startAudioPump(final int channels, final int sampleRate) {
             audioRunning = true;
             audioReadBuf = new short[8192];
             audioPump = new Thread(() -> {
+                // Lock audio to the wall clock: the tap can deliver faster than
+                // real time (it renders ahead / over-delivers), which otherwise
+                // makes the audio track longer than the video and drift behind.
+                // Feed the encoder at most realtime-many frames; drop the excess.
+                final long startNs = System.nanoTime();
+                long fedFrames = 0;
                 while (audioRunning) {
                     int n = OpenALAudioTap.read(audioReadBuf, audioReadBuf.length);
-                    if (n > 0) {
-                        audioEncoder.feed(audioReadBuf, n);
-                    } else {
+                    if (n <= 0) {
                         try {
-                            Thread.sleep(5);
+                            Thread.sleep(3);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             break;
                         }
+                        continue;
                     }
+                    int frames = n / Math.max(1, channels);
+                    long allowed = (System.nanoTime() - startNs) * sampleRate / 1_000_000_000L;
+                    long room = allowed - fedFrames;
+                    if (room <= 0) {
+                        continue; // ahead of real time -> drop to keep A/V in sync
+                    }
+                    int feedFrames = (int) Math.min(frames, room);
+                    audioEncoder.feed(audioReadBuf, feedFrames * channels);
+                    fedFrames += feedFrames;
                 }
             }, "RecordZy-AudioPump");
             audioPump.start();

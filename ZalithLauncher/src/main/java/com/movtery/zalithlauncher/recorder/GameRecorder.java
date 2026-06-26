@@ -433,7 +433,8 @@ public final class GameRecorder {
 
             if (audioOk) {
                 drainTapBacklog(); // drop silence/lead-in captured during probing
-                audioEncoder = new AudioEncoder(aSampleRate, aChannels, 128_000, muxer);
+                audioEncoder = new AudioEncoder(aSampleRate, aChannels, 128_000, muxer,
+                        prefs.getAudioDelayMs() * 1000L);
                 audioEncoder.startDraining();
                 startAudioPump(aChannels, aSampleRate);
             }

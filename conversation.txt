@@ -300,6 +300,23 @@ all ABIs. Opened PR #34 (supersedes #33).
 
 ------------------------------------------------------------
 
+[Turn 22]
+User: Auto doesn't work and still audio ahead of the video (log showed
+"audio delay: 60ms (auto, latency=60ms)", audio still ahead).
+
+Claude: Diagnosed that OpenAL's reported latency (BufferSize/Frequency = 60ms)
+only covers OpenAL's own buffer, not the downstream Android HAL/AudioFlinger
+output path - so auto under-shot. Improved AUTO calibration to add the Android
+system output latency: the recorder now queries AudioManager.getOutputLatency
+(STREAM_MUSIC) by reflection and uses delay = openalMs + sysMs (falling back to
+openalMs + 90ms if the hidden API is blocked, capped at 500ms). Log now prints
+"auto: openal=Xms + sys=Yms". Fixed a broken toast() helper and added the
+systemOutputLatencyMs() helper. App-side only (no OpenAL rebuild); Android CI
+green on b69488e. Pushed to feat/recorder-auto-avsync (PR #34). If auto is still
+off the manual slider (>0) overrides it.
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -321,6 +338,8 @@ KEY OUTCOMES / STATE
     encoding - PR #33.
   * AUTO A/V sync: tap reports device audio output latency, recorder applies it
     automatically (slider 0 = Auto, positive = manual override) - PR #34.
+    Refined to add Android system output latency (AudioManager.getOutputLatency)
+    on top of OpenAL's buffer latency, since OpenAL's value alone under-shot.
 - Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
   A/V offset now auto-calibrated.
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)

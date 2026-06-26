@@ -8,7 +8,9 @@ import android.media.MediaFormat;
  * Lightweight SharedPreferences-backed config for the built-in recorder, kept
  * self-contained so it doesn't touch the launcher's settings framework.
  *
- * <p>Performance-first defaults for weak devices: 720p / 30 FPS / hardware HEVC.</p>
+ * <p>Defaults (per spec): 720p / 60 FPS / 8 Mbps / hardware HEVC. Configurable
+ * up to 1080p and 30-90 FPS. An opt-in "performance mode" caps to 720p/30 for
+ * very weak devices.</p>
  */
 public final class RecorderPrefs {
 
@@ -40,34 +42,42 @@ public final class RecorderPrefs {
         prefs.edit().putBoolean(KEY_ENABLED, v).apply();
     }
 
+    /**
+     * Performance mode is an OPT-IN safety cap (720p / 30 fps) for very weak
+     * devices. It defaults OFF so the user's chosen quality/FPS actually apply -
+     * a previous default-ON value silently pinned recordings to 30 fps even when
+     * the slider was set higher.
+     */
     public boolean isPerformanceMode() {
-        return prefs.getBoolean(KEY_PERFORMANCE_MODE, true);
+        return prefs.getBoolean(KEY_PERFORMANCE_MODE, false);
     }
 
     public void setPerformanceMode(boolean v) {
         prefs.edit().putBoolean(KEY_PERFORMANCE_MODE, v).apply();
     }
 
-    /** Target output height; performance mode caps it at 720p. */
+    /** Target output height. Default 720p; configurable up to 1080p. Performance
+     *  mode (opt-in) caps it at 720p. */
     public int getHeight() {
         int h = prefs.getInt(KEY_HEIGHT, 720);
         if (isPerformanceMode()) {
             h = Math.min(h, 720);
         }
-        return Math.max(240, h);
+        return Math.max(240, Math.min(h, 1080));
     }
 
     public void setHeight(int v) {
         prefs.edit().putInt(KEY_HEIGHT, v).apply();
     }
 
-    /** Target FPS; performance mode caps it at 30. */
+    /** Target FPS. Default 60; configurable 30-90. Performance mode (opt-in)
+     *  caps it at 30. */
     public int getFps() {
-        int fps = prefs.getInt(KEY_FPS, 30);
+        int fps = prefs.getInt(KEY_FPS, 60);
         if (isPerformanceMode()) {
             fps = Math.min(fps, 30);
         }
-        return Math.max(15, Math.min(fps, 90));
+        return Math.max(30, Math.min(fps, 90));
     }
 
     public void setFps(int v) {
@@ -75,7 +85,7 @@ public final class RecorderPrefs {
     }
 
     public int getBitrateKbps() {
-        return Math.max(500, prefs.getInt(KEY_BITRATE_KBPS, 6000));
+        return Math.max(500, prefs.getInt(KEY_BITRATE_KBPS, 8000));
     }
 
     public void setBitrateKbps(int v) {

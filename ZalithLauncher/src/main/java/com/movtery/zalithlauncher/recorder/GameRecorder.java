@@ -416,6 +416,7 @@ public final class GameRecorder {
             RecorderLog.log(appContext, "audio tap: ok=" + audioOk
                     + ", status=\"" + OpenALAudioTap.getStatusMessage() + "\""
                     + ", sampleRate=" + aSampleRate + ", channels=" + aChannels
+                    + ", devices=" + OpenALAudioTap.getDeviceCount()
                     + ", hookCalls=" + OpenALAudioTap.getHookCalls()
                     + ", diag=" + OpenALAudioTap.getDiag());
 
@@ -681,6 +682,7 @@ public final class GameRecorder {
                     + " (hookCalls=" + hookCalls + ")");
             RecorderLog.log(appContext, "STOP: audio samples captured=" + capturedSamples
                     + ", hookCalls=" + hookCalls
+                    + ", devices=" + OpenALAudioTap.getDeviceCount()
                     + ", tapStatus=\"" + OpenALAudioTap.getStatusMessage() + "\"");
         }
 

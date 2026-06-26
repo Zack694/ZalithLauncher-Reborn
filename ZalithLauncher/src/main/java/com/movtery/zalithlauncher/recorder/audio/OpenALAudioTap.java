@@ -73,6 +73,17 @@ public final class OpenALAudioTap {
         return sLibLoaded ? safeGetChannels() : 0;
     }
 
+    /** Number of distinct OpenAL devices/contexts seen (>1 means the tap saw
+     *  multiple outputs and locked onto the first). -1 if unknown. */
+    public static int getDeviceCount() {
+        if (!sLibLoaded) return -1;
+        try {
+            return nativeGetDeviceCount();
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
     /** Human-readable status of the last {@link #start()} attempt. */
     public static String getStatusMessage() {
         if (!sLibTried) {
@@ -165,6 +176,8 @@ public final class OpenALAudioTap {
     private static native int nativeGetSampleRate();
 
     private static native int nativeGetChannels();
+
+    private static native int nativeGetDeviceCount();
 
     private static native int nativeGetStatus();
 

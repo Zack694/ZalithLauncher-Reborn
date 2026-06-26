@@ -38,6 +38,7 @@ using tap_active_t = void (*)(int);
 tap_read_t g_read = nullptr;
 tap_int_t g_samplerate = nullptr;
 tap_int_t g_channels = nullptr;
+tap_int_t g_deviceCount = nullptr;
 tap_active_t g_setActive = nullptr;
 
 bool g_resolved = false;
@@ -148,6 +149,8 @@ bool resolve() {
     g_samplerate = reinterpret_cast<tap_int_t>(base + sr);
     g_channels = reinterpret_cast<tap_int_t>(base + ch);
     g_setActive = reinterpret_cast<tap_active_t>(base + ac);
+    uintptr_t dc = elf_sym_value(path, "recordzy_tap_device_count");
+    g_deviceCount = (dc != 0) ? reinterpret_cast<tap_int_t>(base + dc) : nullptr;
     g_resolved = true;
     g_lastError = 0;
     std::snprintf(g_diag, sizeof(g_diag), "tap API resolved in %s base=%p", path,
@@ -189,6 +192,12 @@ Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetSampleRat
 JNIEXPORT jint JNICALL
 Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetChannels(JNIEnv *, jclass) {
     return g_channels ? g_channels() : 0;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetDeviceCount(JNIEnv *,
+                                                                                   jclass) {
+    return g_deviceCount ? g_deviceCount() : -1;
 }
 
 JNIEXPORT jint JNICALL

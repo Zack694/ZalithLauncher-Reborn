@@ -39,7 +39,7 @@ if "recordzy_tap.h" not in s:
 # i.e. after the while loop that follows "#undef HANDLE_WRITE", just before the
 # function's closing brace. Whitespace-tolerant.
 pat = re.compile(r'(#undef HANDLE_WRITE.*?total \+= samplesToDo;\s*\})\s*\}', re.DOTALL)
-feed = ('\n    recordzy_tap_feed(outBuffer, numSamples, frameStep, Frequency, '
+feed = ('\n    recordzy_tap_feed(this, outBuffer, numSamples, frameStep, Frequency, '
         'static_cast<unsigned>(BytesFromDevFmt(FmtType)), '
         'FmtType == DevFmtFloat ? 1 : 0);\n}')
 s2, n = pat.subn(lambda m: m.group(1) + feed, s, count=1)
@@ -55,7 +55,7 @@ p = "libopenal.version"
 s = open(p).read()
 syms = ("    recordzy_tap_feed;\n    recordzy_tap_read;\n"
         "    recordzy_tap_samplerate;\n    recordzy_tap_channels;\n"
-        "    recordzy_tap_set_active;\n")
+        "    recordzy_tap_device_count;\n    recordzy_tap_set_active;\n")
 assert "global:" in s, "no global: section in libopenal.version"
 s = s.replace("global:\n", "global:\n" + syms, 1)
 open(p, "w").write(s)

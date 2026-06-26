@@ -460,34 +460,95 @@ public final class GameRecorder {
 
         private void startAudioPump(final int channels, final int sampleRate) {
             audioRunning = true;
+            final int ch = Math.max(1, channels);
+            final int outRate = sampleRate;
             audioReadBuf = new short[8192];
             audioPump = new Thread(() -> {
-                // Lock audio to the wall clock: the tap can deliver faster than
-                // real time (it renders ahead / over-delivers), which otherwise
-                // makes the audio track longer than the video and drift behind.
-                // Feed the encoder at most realtime-many frames; drop the excess.
+                // The tap over-delivers (≈2x real time). Dropping chunks makes the
+                // audio choppy/"windy", so instead we RESAMPLE the incoming stream
+                // down to real time with linear interpolation: output is paced to
+                // the wall clock (outRate frames/sec) and the read cursor advances
+                // through the input at the measured input/output rate ratio. This
+                // yields a smooth, continuous, in-sync track regardless of how fast
+                // the tap feeds.
                 final long startNs = System.nanoTime();
-                long fedFrames = 0;
+                short[] pend = new short[outRate * ch * 2]; // ~2s of input headroom
+                int pendFrames = 0;
+                double pos = 0.0;       // fractional read index (in frames) into pend
+                long inFrames = 0;       // total input frames received
+                long outFrames = 0;      // total output frames produced
+                short[] outBuf = new short[outRate * ch / 4 + 64]; // up to ~250ms per tick
+
                 while (audioRunning) {
                     int n = OpenALAudioTap.read(audioReadBuf, audioReadBuf.length);
-                    if (n <= 0) {
+                    boolean producedAny = false;
+                    if (n > 0) {
+                        int frames = n / ch;
+                        if ((pendFrames + frames) * ch > pend.length) {
+                            short[] bigger = new short[Math.max((pendFrames + frames) * ch,
+                                    pend.length * 2)];
+                            System.arraycopy(pend, 0, bigger, 0, pendFrames * ch);
+                            pend = bigger;
+                        }
+                        System.arraycopy(audioReadBuf, 0, pend, pendFrames * ch, frames * ch);
+                        pendFrames += frames;
+                        inFrames += frames;
+                    }
+
+                    double elapsed = (System.nanoTime() - startNs) / 1_000_000_000.0;
+                    double ratio = 1.0;
+                    if (elapsed > 0.1 && inFrames > 0) {
+                        ratio = (inFrames / elapsed) / outRate; // ≈ input_rate / output_rate
+                        if (ratio < 0.5) ratio = 0.5;
+                        if (ratio > 4.0) ratio = 4.0;
+                    }
+                    // Cap backlog so latency can't build up (keep < ~0.3s of input).
+                    double maxBacklog = outRate * ratio * 0.3;
+                    if (pendFrames - pos > maxBacklog) {
+                        pos = pendFrames - maxBacklog;
+                    }
+
+                    long desiredOut = (long) (elapsed * outRate);
+                    int produced = 0;
+                    while (outFrames < desiredOut && pos + 1.0 < pendFrames) {
+                        int i0 = (int) pos;
+                        double frac = pos - i0;
+                        int base0 = i0 * ch;
+                        int base1 = base0 + ch;
+                        for (int c = 0; c < ch; c++) {
+                            int s0 = pend[base0 + c];
+                            int s1 = pend[base1 + c];
+                            int v = (int) (s0 + (s1 - s0) * frac);
+                            if (v > 32767) v = 32767;
+                            else if (v < -32768) v = -32768;
+                            outBuf[produced * ch + c] = (short) v;
+                        }
+                        produced++;
+                        pos += ratio;
+                        outFrames++;
+                        if ((produced + 1) * ch > outBuf.length) break; // flush this batch
+                    }
+                    if (produced > 0) {
+                        audioEncoder.feed(outBuf, produced * ch);
+                        producedAny = true;
+                    }
+
+                    int drop = (int) Math.floor(pos);
+                    if (drop > pendFrames) drop = pendFrames;
+                    if (drop > 0) {
+                        System.arraycopy(pend, drop * ch, pend, 0, (pendFrames - drop) * ch);
+                        pendFrames -= drop;
+                        pos -= drop;
+                    }
+
+                    if (n <= 0 && !producedAny) {
                         try {
                             Thread.sleep(3);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             break;
                         }
-                        continue;
                     }
-                    int frames = n / Math.max(1, channels);
-                    long allowed = (System.nanoTime() - startNs) * sampleRate / 1_000_000_000L;
-                    long room = allowed - fedFrames;
-                    if (room <= 0) {
-                        continue; // ahead of real time -> drop to keep A/V in sync
-                    }
-                    int feedFrames = (int) Math.min(frames, room);
-                    audioEncoder.feed(audioReadBuf, feedFrames * channels);
-                    fedFrames += feedFrames;
                 }
             }, "RecordZy-AudioPump");
             audioPump.start();

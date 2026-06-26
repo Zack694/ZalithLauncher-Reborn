@@ -73,7 +73,7 @@ build_abi() {
         -DALSOFT_TESTS=OFF \
         -DCMAKE_BUILD_TYPE=Release \
         "$WORK/openal-soft" >/dev/null
-    ninja openal
+    ninja OpenAL
     local SO
     SO="$(find . -name libopenal.so | head -1)"
     if [ -z "$SO" ]; then echo "ERROR: libopenal.so not built for $ABI"; exit 1; fi

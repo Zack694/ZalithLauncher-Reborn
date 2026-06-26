@@ -27,22 +27,24 @@ cp "$HERE/recordzy_tap.h" ./recordzy_tap.h
 # Inject the tap: include the header in the mixer TU and call the feed function
 # at the end of DeviceBase::renderSamples(void*, uint, size_t).
 python3 - <<'PY'
+import re
 p = "alc/alu.cpp"
 s = open(p).read()
 assert '#include "config.h"' in s, "config.h include not found in alu.cpp"
 if "recordzy_tap.h" not in s:
     s = s.replace('#include "config.h"',
                   '#include "config.h"\n#include "recordzy_tap.h"', 1)
-anchor = ('#undef HANDLE_WRITE\n            }\n        }\n'
-          '        total += samplesToDo;\n    }\n}')
-repl = ('#undef HANDLE_WRITE\n            }\n        }\n'
-        '        total += samplesToDo;\n    }\n'
-        '    recordzy_tap_feed(outBuffer, numSamples, frameStep, Frequency, '
+# Insert the tap feed at the end of
+#   DeviceBase::renderSamples(void*, uint, size_t)
+# i.e. after the while loop that follows "#undef HANDLE_WRITE", just before the
+# function's closing brace. Whitespace-tolerant.
+pat = re.compile(r'(#undef HANDLE_WRITE.*?total \+= samplesToDo;\s*\})\s*\}', re.DOTALL)
+feed = ('\n    recordzy_tap_feed(outBuffer, numSamples, frameStep, Frequency, '
         'static_cast<unsigned>(BytesFromDevFmt(FmtType)), '
         'FmtType == DevFmtFloat ? 1 : 0);\n}')
-assert anchor in s, "renderSamples anchor not found in alu.cpp"
-s = s.replace(anchor, repl, 1)
-open(p, "w").write(s)
+s2, n = pat.subn(lambda m: m.group(1) + feed, s, count=1)
+assert n == 1, "renderSamples anchor not found in alu.cpp"
+open(p, "w").write(s2)
 print("patched alc/alu.cpp")
 PY
 

@@ -226,6 +226,21 @@ build is playing ~2x and needs a sample-rate fix; if normal, done.)
 
 ------------------------------------------------------------
 
+[Turn 17]
+User: Now the audio is very stuttery and kind of "deep fried" type audio. (log)
+22s recording, audio samples captured=4,304,640 (= ~2x real time again).
+
+Claude: Found a resampler bug: at a 2x ratio, linear interpolation lands on
+integer sample positions (fractional part always 0), degenerating into "take
+every other sample" with no filtering = aliasing = the "deep fried" sound.
+Switched to an averaging (anti-alias) downsampler: average win=round(ratio)
+input samples before decimating. CI green. Opened PR #30. Reiterated the
+decisive open question: does the GAME's own audio (not the recording) sound
+normal vs fast/high-pitched - if fast, the custom OpenAL build is playing at ~2x
+and needs a sample-rate fix rather than a recorder-side workaround.
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -236,7 +251,12 @@ KEY OUTCOMES / STATE
     PR #27. No ShadowHook, no MediaProjection, no permission prompt.
   * Wall-clock audio pacing to fix 2x over-capture drift - PR #28 (merged).
   * Linear-interpolation resampler to fix choppy/"windy" audio from the 2x
-    over-delivery - PR #29.
+    over-delivery - PR #29 (merged).
+  * Anti-alias (averaging) downsample to fix "deep fried" audio - PR #30.
+- Unresolved: the tap consistently captures ~2x real time. If the game's own
+  audio is fast/high-pitched, the custom OpenAL build is playing at ~2x (a
+  sample-rate config issue to fix in the OpenAL build); if the game sounds
+  normal, the recorder-side resampler should now produce correct audio.
   * Diagnostics: on-screen toasts + recordzy-log.txt next to the recordings.
 - Open question at time of writing: whether the game's own audio is normal-pitch
   (2x is just over-delivery, fixed by pacing) or actually 2x-fast (would need an

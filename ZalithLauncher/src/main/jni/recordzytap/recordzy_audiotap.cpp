@@ -39,6 +39,7 @@ tap_read_t g_read = nullptr;
 tap_int_t g_samplerate = nullptr;
 tap_int_t g_channels = nullptr;
 tap_int_t g_deviceCount = nullptr;
+tap_int_t g_latencyMs = nullptr;
 tap_active_t g_setActive = nullptr;
 
 bool g_resolved = false;
@@ -151,6 +152,8 @@ bool resolve() {
     g_setActive = reinterpret_cast<tap_active_t>(base + ac);
     uintptr_t dc = elf_sym_value(path, "recordzy_tap_device_count");
     g_deviceCount = (dc != 0) ? reinterpret_cast<tap_int_t>(base + dc) : nullptr;
+    uintptr_t lat = elf_sym_value(path, "recordzy_tap_latency_ms");
+    g_latencyMs = (lat != 0) ? reinterpret_cast<tap_int_t>(base + lat) : nullptr;
     g_resolved = true;
     g_lastError = 0;
     std::snprintf(g_diag, sizeof(g_diag), "tap API resolved in %s base=%p", path,
@@ -198,6 +201,11 @@ JNIEXPORT jint JNICALL
 Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetDeviceCount(JNIEnv *,
                                                                                    jclass) {
     return g_deviceCount ? g_deviceCount() : -1;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_movtery_zalithlauncher_recorder_audio_OpenALAudioTap_nativeGetLatencyMs(JNIEnv *, jclass) {
+    return g_latencyMs ? g_latencyMs() : 0;
 }
 
 JNIEXPORT jint JNICALL

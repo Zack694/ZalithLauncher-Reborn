@@ -433,10 +433,17 @@ public final class GameRecorder {
 
             if (audioOk) {
                 drainTapBacklog(); // drop silence/lead-in captured during probing
+                // A/V sync delay: 0 = AUTO (use the measured audio output latency),
+                // otherwise the user's fixed override.
+                int manualMs = prefs.getAudioDelayMs();
+                int delayMs = (manualMs > 0) ? manualMs : OpenALAudioTap.getLatencyMs();
                 audioEncoder = new AudioEncoder(aSampleRate, aChannels, 128_000, muxer,
-                        prefs.getAudioDelayMs() * 1000L);
+                        delayMs * 1000L);
                 audioEncoder.startDraining();
                 startAudioPump(aChannels, aSampleRate);
+                RecorderLog.log(appContext, "audio delay: " + delayMs + "ms ("
+                        + (manualMs > 0 ? "manual" : "auto, latency=" + OpenALAudioTap.getLatencyMs()
+                        + "ms") + ")");
             }
 
             Log.i(TAG, "Recording -> " + out + " (" + targetW + "x" + targetH

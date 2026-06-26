@@ -126,7 +126,8 @@ public class GameMenuSettingsController implements
         binding.recorderBitrate.setOnSeekBarChangeListener(this);
 
         binding.recorderAvsync.setProgress(p.getAudioDelayMs());
-        binding.recorderAvsyncValue.setText(p.getAudioDelayMs() + " ms");
+        binding.recorderAvsyncValue.setText(p.getAudioDelayMs() == 0 ? "Auto"
+                : p.getAudioDelayMs() + " ms");
         binding.recorderAvsync.setOnSeekBarChangeListener(this);
 
         updateRecorderToggleText();
@@ -456,7 +457,7 @@ public class GameMenuSettingsController implements
             if (saveValue) {
                 new RecorderPrefs(activity).setAudioDelayMs(progress);
             }
-            binding.recorderAvsyncValue.setText(progress + " ms");
+            binding.recorderAvsyncValue.setText(progress == 0 ? "Auto" : progress + " ms");
         }
     }
 

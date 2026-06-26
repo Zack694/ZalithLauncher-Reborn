@@ -74,13 +74,24 @@ public final class OpenALAudioTap {
     }
 
     /** Number of distinct OpenAL devices/contexts seen (>1 means the tap saw
-     *  multiple outputs and locked onto the first). -1 if unknown. */
+     *  multiple outputs and mixed them). -1 if unknown. */
     public static int getDeviceCount() {
         if (!sLibLoaded) return -1;
         try {
             return nativeGetDeviceCount();
         } catch (Throwable t) {
             return -1;
+        }
+    }
+
+    /** Measured audio output latency in ms (how far ahead audio is buffered),
+     *  for auto A/V sync. 0 if unknown. */
+    public static int getLatencyMs() {
+        if (!sLibLoaded) return 0;
+        try {
+            return nativeGetLatencyMs();
+        } catch (Throwable t) {
+            return 0;
         }
     }
 
@@ -178,6 +189,8 @@ public final class OpenALAudioTap {
     private static native int nativeGetChannels();
 
     private static native int nativeGetDeviceCount();
+
+    private static native int nativeGetLatencyMs();
 
     private static native int nativeGetStatus();
 

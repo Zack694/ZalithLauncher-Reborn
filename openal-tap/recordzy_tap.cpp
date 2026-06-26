@@ -33,6 +33,7 @@ int g_devN = 0;
 std::atomic<int> g_rate{0};
 std::atomic<int> g_chans{0};
 std::atomic<int> g_active{0};
+std::atomic<int> g_latencyMs{0};
 
 inline int16_t floatToS16(float f) {
     if (f >= 1.0f) return 32767;
@@ -57,8 +58,22 @@ RZ_EXPORT void recordzy_tap_set_active(int active) {
         if (g_acc && g_ch > 0) {
             std::memset(g_acc, 0, kCapFrames * static_cast<size_t>(g_ch) * sizeof(int32_t));
         }
+        g_latencyMs.store(0, std::memory_order_relaxed);
     }
     g_active.store(active, std::memory_order_release);
+}
+
+RZ_EXPORT void recordzy_tap_set_latency(unsigned bufferFrames, unsigned freq) {
+    if (freq == 0) return;
+    int ms = static_cast<int>(static_cast<uint64_t>(bufferFrames) * 1000u / freq);
+    // Keep the largest device buffer latency seen this session.
+    int prev = g_latencyMs.load(std::memory_order_relaxed);
+    while (ms > prev && !g_latencyMs.compare_exchange_weak(prev, ms, std::memory_order_relaxed)) {
+    }
+}
+
+RZ_EXPORT int recordzy_tap_latency_ms(void) {
+    return g_latencyMs.load(std::memory_order_acquire);
 }
 
 // Mixes each OpenAL device's freshly rendered PCM onto a shared timeline. All

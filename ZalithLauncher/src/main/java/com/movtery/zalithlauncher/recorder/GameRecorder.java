@@ -169,6 +169,34 @@ public final class GameRecorder {
         });
     }
 
+    /**
+     * Best-effort query of the Android audio output (HAL/AudioFlinger) latency in
+     * milliseconds. OpenAL only reports its own buffer latency, which misses the
+     * downstream output path; adding this gives a much closer auto A/V offset.
+     * {@code getOutputLatency} is a hidden API and may be blocked on newer API
+     * levels, in which case we return 0 and the caller falls back to a constant.
+     */
+    private int systemOutputLatencyMs() {
+        try {
+            final Context ctx = appContext;
+            if (ctx == null) {
+                return 0;
+            }
+            android.media.AudioManager am = (android.media.AudioManager)
+                    ctx.getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) {
+                return 0;
+            }
+            java.lang.reflect.Method m = android.media.AudioManager.class
+                    .getMethod("getOutputLatency", int.class);
+            Object r = m.invoke(am, 3 /* STREAM_MUSIC */);
+            int v = (r instanceof Integer) ? (Integer) r : 0;
+            return (v > 0 && v < 1000) ? v : 0;
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
     private static int align16(int value) {
         int aligned = value & ~15;
         return Math.max(16, aligned);
@@ -433,17 +461,28 @@ public final class GameRecorder {
 
             if (audioOk) {
                 drainTapBacklog(); // drop silence/lead-in captured during probing
-                // A/V sync delay: 0 = AUTO (use the measured audio output latency),
+                // A/V sync delay: 0 = AUTO (measured OpenAL buffer latency +
+                // the Android output/HAL latency, which OpenAL can't see),
                 // otherwise the user's fixed override.
                 int manualMs = prefs.getAudioDelayMs();
-                int delayMs = (manualMs > 0) ? manualMs : OpenALAudioTap.getLatencyMs();
+                int openalMs = OpenALAudioTap.getLatencyMs();
+                int sysMs = systemOutputLatencyMs();
+                int delayMs;
+                if (manualMs > 0) {
+                    delayMs = manualMs;
+                } else {
+                    // OpenAL buffers `openalMs` before handing audio to the OS,
+                    // then the OS adds its own output latency before it's heard.
+                    delayMs = openalMs + (sysMs > 0 ? sysMs : 90);
+                    if (delayMs > 500) delayMs = 500;
+                }
                 audioEncoder = new AudioEncoder(aSampleRate, aChannels, 128_000, muxer,
                         delayMs * 1000L);
                 audioEncoder.startDraining();
                 startAudioPump(aChannels, aSampleRate);
                 RecorderLog.log(appContext, "audio delay: " + delayMs + "ms ("
-                        + (manualMs > 0 ? "manual" : "auto, latency=" + OpenALAudioTap.getLatencyMs()
-                        + "ms") + ")");
+                        + (manualMs > 0 ? "manual"
+                        : "auto: openal=" + openalMs + "ms + sys=" + sysMs + "ms") + ")");
             }
 
             Log.i(TAG, "Recording -> " + out + " (" + targetW + "x" + targetH

@@ -82,6 +82,19 @@ public final class RecorderPrefs {
         prefs.edit().putInt(KEY_BITRATE_KBPS, v).apply();
     }
 
+    private static final String KEY_AUDIO_DELAY_MS = "audio_delay_ms";
+
+    /** How much to delay the audio track to line it up with video. OpenAL renders
+     *  audio slightly ahead of when it's heard, so the captured audio tends to be
+     *  a bit ahead of the video; this shifts it back. Default 90 ms, 0-500 ms. */
+    public int getAudioDelayMs() {
+        return Math.max(0, Math.min(500, prefs.getInt(KEY_AUDIO_DELAY_MS, 90)));
+    }
+
+    public void setAudioDelayMs(int v) {
+        prefs.edit().putInt(KEY_AUDIO_DELAY_MS, Math.max(0, Math.min(500, v))).apply();
+    }
+
     /** FFmpeg-free: returns the MediaCodec mime type. */
     public String getMimeType() {
         String codec = prefs.getString(KEY_CODEC, "hevc");

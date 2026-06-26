@@ -48,6 +48,15 @@ public final class VideoEncoder {
         // scheduler size its workload and reduces stalls that back-pressure the
         // capture queue (which would lag the game).
         format.setInteger(MediaFormat.KEY_OPERATING_RATE, frameRate);
+        // Low-latency encoding: minimise internal buffering/B-frames so the
+        // encoder returns frames quickly and doesn't back-pressure the GL
+        // compositor (which would stutter the live game view).
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            try {
+                format.setInteger(MediaFormat.KEY_LATENCY, 1);
+            } catch (Throwable ignored) {
+            }
+        }
 
         mEncoder = MediaCodec.createEncoderByType(mimeType);
         mEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);

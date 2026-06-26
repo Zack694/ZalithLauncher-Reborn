@@ -125,6 +125,10 @@ public class GameMenuSettingsController implements
         binding.recorderBitrateValue.setText(mbps + " Mbps");
         binding.recorderBitrate.setOnSeekBarChangeListener(this);
 
+        binding.recorderAvsync.setProgress(p.getAudioDelayMs());
+        binding.recorderAvsyncValue.setText(p.getAudioDelayMs() + " ms");
+        binding.recorderAvsync.setOnSeekBarChangeListener(this);
+
         updateRecorderToggleText();
     }
 
@@ -448,6 +452,11 @@ public class GameMenuSettingsController implements
                 new RecorderPrefs(activity).setBitrateKbps(mbps * 1000);
             }
             binding.recorderBitrateValue.setText(mbps + " Mbps");
+        } else if (seekBar == binding.recorderAvsync) {
+            if (saveValue) {
+                new RecorderPrefs(activity).setAudioDelayMs(progress);
+            }
+            binding.recorderAvsyncValue.setText(progress + " ms");
         }
     }
 

@@ -24,17 +24,19 @@ public final class AudioEncoder {
     private final MediaCodec.BufferInfo mBufferInfo = new MediaCodec.BufferInfo();
     private final int mSampleRate;
     private final int mChannels;
+    private final long mPtsOffsetUs;
 
     private int mTrackIndex = -1;
     private volatile boolean mRunning = false;
     private Thread mDrainThread;
     private long mTotalFrames = 0; // frames = samples / channels, per channel
 
-    public AudioEncoder(int sampleRate, int channels, int bitRate, Mp4Muxer muxer)
-            throws IOException {
+    public AudioEncoder(int sampleRate, int channels, int bitRate, Mp4Muxer muxer,
+                        long ptsOffsetUs) throws IOException {
         this.mMuxer = muxer;
         this.mSampleRate = sampleRate;
         this.mChannels = Math.max(1, channels);
+        this.mPtsOffsetUs = ptsOffsetUs;
 
         MediaFormat format = MediaFormat.createAudioFormat(
                 MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, mChannels);
@@ -89,7 +91,7 @@ public final class AudioEncoder {
             in.position(0);
             in.limit(chunk * 2);
 
-            long ptsUs = mTotalFrames * 1_000_000L / mSampleRate;
+            long ptsUs = mPtsOffsetUs + mTotalFrames * 1_000_000L / mSampleRate;
             mTotalFrames += chunk / mChannels;
             mEncoder.queueInputBuffer(inIndex, 0, chunk * 2, ptsUs, 0);
             offset += chunk;
@@ -101,7 +103,7 @@ public final class AudioEncoder {
             try {
                 int inIndex = mEncoder.dequeueInputBuffer(TIMEOUT_US);
                 if (inIndex >= 0) {
-                    long ptsUs = mTotalFrames * 1_000_000L / mSampleRate;
+                    long ptsUs = mPtsOffsetUs + mTotalFrames * 1_000_000L / mSampleRate;
                     mEncoder.queueInputBuffer(inIndex, 0, 0, ptsUs,
                             MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                 }

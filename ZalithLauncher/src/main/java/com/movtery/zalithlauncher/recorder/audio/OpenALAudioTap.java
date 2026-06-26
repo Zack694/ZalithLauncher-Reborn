@@ -28,10 +28,6 @@ public final class OpenALAudioTap {
             return sLibLoaded;
         }
         sLibTried = true;
-        // Do NOT load libshadowhook.so explicitly: its JNI_OnLoad needs ShadowHook's
-        // Java class (which we don't ship) and would return JNI_ERR. It loads fine
-        // as a dependency of librecordzytap.so (its JNI_OnLoad isn't invoked for a
-        // dependency), and we drive its C API directly from native code.
         try {
             System.loadLibrary("recordzytap");
             sLibLoaded = true;
@@ -92,11 +88,8 @@ public final class OpenALAudioTap {
             return "unknown";
         }
         switch (code) {
-            case 0: return "hook installed";
-            case 2: return "ShadowHook init failed";
-            case 3: return "OpenAL symbol not found";
-            case 4: return "inline hook failed";
-            case 5: return "out of memory";
+            case 0: return "tap connected";
+            case 3: return "OpenAL has no RecordZy tap (custom build not loaded?)";
             default: return "code " + code;
         }
     }

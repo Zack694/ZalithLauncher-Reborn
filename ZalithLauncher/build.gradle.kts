@@ -169,7 +169,7 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            pickFirsts += listOf("**/libbytehook.so", "**/libshadowhook.so")
+            pickFirsts += listOf("**/libbytehook.so")
         }
     }
 

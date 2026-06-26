@@ -11,12 +11,6 @@ LOCAL_PATH := $(HERE_PATH)
 $(call import-module,prefab/bytehook)
 LOCAL_PATH := $(HERE_PATH)
 
-# ShadowHook only ships armeabi-v7a / arm64-v8a; gate the audio tap on arm.
-# We vendor its prebuilt .so + header (recordzytap/prebuilt, recordzytap/include)
-# instead of consuming the prefab AAR, so prefab never tries (and fails) to
-# resolve a non-existent x86/x86_64 shadowhook library.
-RECORDZY_AUDIO_ABI := $(filter $(TARGET_ARCH_ABI),armeabi-v7a arm64-v8a)
-
 
 include $(CLEAR_VARS)
 LOCAL_LDLIBS := -ldl -llog -landroid
@@ -80,27 +74,16 @@ LOCAL_LDFLAGS := -z global
 include $(BUILD_SHARED_LIBRARY)
 
 
-# RecordZy audio tap: inline-hooks OpenAL-soft's mixer to capture game audio.
-# Only built for arm ABIs (ShadowHook has no x86/x86_64 library). On other ABIs
-# librecordzytap.so is absent and the Java side falls back to video-only.
-ifneq ($(RECORDZY_AUDIO_ABI),)
-include $(CLEAR_VARS)
-LOCAL_MODULE := shadowhook
-# Single source of truth lives in jniLibs/ (so AGP reliably packages it into the
-# APK); referenced here only for link-time symbol resolution.
-LOCAL_SRC_FILES := ../jniLibs/$(TARGET_ARCH_ABI)/libshadowhook.so
-LOCAL_EXPORT_C_INCLUDES := $(HERE_PATH)/recordzytap/include
-include $(PREBUILT_SHARED_LIBRARY)
-
+# RecordZy audio tap: reads game audio from our custom libopenal.so (which has
+# the tap compiled in and exports recordzy_tap_*). Pure resolver - no external
+# deps - so it builds for every ABI; on a stock OpenAL without the tap it just
+# resolves nothing and the recorder falls back to video-only.
 include $(CLEAR_VARS)
 LOCAL_MODULE := recordzytap
-LOCAL_LDLIBS := -ldl -llog
-LOCAL_SHARED_LIBRARIES := shadowhook
-LOCAL_C_INCLUDES := $(HERE_PATH)/recordzytap/include
+LOCAL_LDLIBS := -llog
 LOCAL_SRC_FILES := recordzytap/recordzy_audiotap.cpp
 LOCAL_CPPFLAGS += -std=c++17
 include $(BUILD_SHARED_LIBRARY)
-endif
 
 
 include $(CLEAR_VARS)

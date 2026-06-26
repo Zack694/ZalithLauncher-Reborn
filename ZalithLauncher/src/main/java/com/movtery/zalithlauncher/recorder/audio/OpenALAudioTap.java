@@ -121,6 +121,19 @@ public final class OpenALAudioTap {
         }
     }
 
+    /** Native resolution diagnostics (library path found, or a maps dump). */
+    public static String getDiag() {
+        if (!sLibLoaded) {
+            return "";
+        }
+        try {
+            String d = nativeGetDiag();
+            return d != null ? d : "";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
     /**
      * Drains up to {@code out.length} interleaved int16 samples into {@code out}.
      * @return the number of samples copied (0 if none are buffered yet).
@@ -165,6 +178,8 @@ public final class OpenALAudioTap {
     private static native long nativeGetHookCalls();
 
     private static native long nativeGetCapturedSamples();
+
+    private static native String nativeGetDiag();
 
     private static native int nativeRead(short[] out, int maxSamples);
 }

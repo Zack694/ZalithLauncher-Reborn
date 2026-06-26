@@ -210,6 +210,22 @@ on subsequent changes to Mod-RecordZy, FFmpegPlugin, or ZalithLauncher-Reborn.
 
 ------------------------------------------------------------
 
+[Turn 16]
+User: Now the audio is so stuttery, like "RrRrrrRrrr" / like wind blowing fast in
+your ears - fix that. But the delay is gone.
+
+Claude: The wall-clock pacing (PR #28) removed the drift but dropped whole chunks
+of the 2x-over-delivered stream (decimation without smoothing) -> the choppy
+"windy" artifact. Replaced the drop-the-excess pump with a linear-interpolation
+resampler: output paced to the wall clock (sampleRate frames/sec), read cursor
+advancing through buffered input at the measured ~2x input/output ratio with
+interpolation, plus a backlog cap to bound latency. Smooth, continuous, in-sync
+audio regardless of the tap's delivery rate. CI green on all ABIs. Opened PR #29.
+(Still open: if the audio is smooth but fast/high-pitched, the custom OpenAL
+build is playing ~2x and needs a sample-rate fix; if normal, done.)
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -218,7 +234,9 @@ KEY OUTCOMES / STATE
   * Game audio via a custom OpenAL-soft 1.23.1 build with a compiled-in tap
     (exported recordzy_tap_* C API), read by recordzytap via /proc/self/maps -
     PR #27. No ShadowHook, no MediaProjection, no permission prompt.
-  * Wall-clock audio pacing to fix 2x over-capture drift - PR #28.
+  * Wall-clock audio pacing to fix 2x over-capture drift - PR #28 (merged).
+  * Linear-interpolation resampler to fix choppy/"windy" audio from the 2x
+    over-delivery - PR #29.
   * Diagnostics: on-screen toasts + recordzy-log.txt next to the recordings.
 - Open question at time of writing: whether the game's own audio is normal-pitch
   (2x is just over-delivery, fixed by pacing) or actually 2x-fast (would need an

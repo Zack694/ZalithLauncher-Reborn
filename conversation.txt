@@ -1,0 +1,225 @@
+CONVERSATION TRANSCRIPT
+========================
+Note: The assistant does not have access to real per-message timestamps for
+this conversation - only the current date/time is known. Timestamps below are
+therefore NOT real times; turns are numbered in chronological order instead.
+This is a transcript of the working conversation between the User (Zack858 /
+Zack694) and the AI assistant ("Claude"/Kiro) about building the RecordZy
+screen+audio recorder, across three repos: Mod-RecordZy (Fabric mod),
+FFmpegPlugin, and ZalithLauncher-Reborn (built-in recorder). It is a summary
+transcript of the conversation only, not a dump of any system configuration or
+hidden instructions.
+
+Current date when this file was written: 2026-06-26
+
+============================================================
+
+[Turn 1]
+User: Create a Minecraft Fabric 1.21.11 mod that records the screen using HEVC,
+with start/stop/pause buttons in the pause menu (like Replay Mod), using FFmpeg,
+heavily optimized / not laggy. Defaults: 60fps, 720p, 8 bitrate; exports MP4 to
+recordzy/recordings/. Configurable via Mod Menu + Cloth Config (up to 1080p,
+30-90fps). Target device: ZalithLauncher (Android), Snapdragon 7s Gen 2; FFmpeg
+already present. Name it "RecordZy by Zack858". (Message also carried a summary
+of prior work and the directive "Continue working on the task described above.")
+
+Claude: Continued the active task - the ZalithLauncher-Reborn built-in recorder
+optimization. Reworked the GPU "tee" to be ON-DEMAND (native renders straight to
+the display when idle, zero overhead; the recorder only borrows the surface
+while recording), with a safe revert if the surface hand-off fails so gameplay
+is never harmed. Fixed EglCore to not eglTerminate the process-shared display.
+Added encoder priority/operating-rate tuning + URGENT_DISPLAY GL thread, and
+removed the old "enable + relaunch" toggle. CI (all ABIs) passed. Opened PR #16.
+
+------------------------------------------------------------
+
+[Turn 2]
+User: Create a new pr
+
+Claude: Created a fresh branch and opened PR #17 with the same verified
+on-demand-tee optimization commit.
+
+------------------------------------------------------------
+
+[Turn 3]
+User: Wait, how can we add audio to the video? Give me 3 methods and I'll choose
+first before applying.
+
+Claude: Gave three options for capturing game audio in ZalithLauncher:
+  (1) AudioPlaybackCapture (MediaProjection, audio-only) - clean game audio but
+      shows a permission prompt each session.
+  (2) Patched OpenAL tap (intercept libopenal's mixed PCM) - best quality, no
+      prompt, but more effort / tied to the launcher's OpenAL.
+  (3) Microphone via AudioRecord - simplest, but only captures the mic, not a
+      clean game feed.
+Recommended (1); noted (2) as the "purist" option.
+
+------------------------------------------------------------
+
+[Turn 4]
+User: Wait no - isn't the launcher launching Minecraft? Can't we use the
+Minecraft sound system itself? If we can't, stick to Method 2. Also it's more
+optimized now but has microstutters sometimes - is that because I record at
+45fps but get 59-60+ fps?
+
+Claude: Explained that Minecraft's sound goes through LWJGL -> OpenAL
+(libopenal.so) in the same process, so "use Minecraft's sound" IS Method 2 (the
+OpenAL tap). Also explained the microstutters: recording at 45fps against a
+~60fps game creates an uneven 3:4 cadence where some displayed frames do double
+GPU work - recommended using 30fps (a clean divisor) instead of 45.
+
+------------------------------------------------------------
+
+[Turn 5]
+User: Wdym Method 2 might break when launcher or MC updates?
+
+Claude: Explained that an OpenAL tap couples to a specific libopenal.so build
+(internal symbols/ABI), so a launcher OpenAL update could break a runtime hook;
+contrasted with Method 1 riding a stable Android API. Noted breakage would be
+graceful (fall back to video-only), not a crash.
+
+------------------------------------------------------------
+
+[Turn 6]
+User: Wdym launcher updates - WE and I are the only ones updating it.
+
+Claude: Conceded the point - since it's a self-maintained fork and libopenal.so
+is a committed binary, "auto-update breakage" mostly doesn't apply. Inspected
+the repo and found libopenal.so is a prebuilt, un-stripped OpenAL-soft using the
+OpenSL backend - so a tap is feasible, with the real cost being a native build
+(no source in the repo). Laid out Method 2 route (a) rebuild-from-source vs
+route (b) lightweight runtime hook.
+
+------------------------------------------------------------
+
+[Turn 7]
+User: Yes route b
+
+Claude: Implemented route (b): a native module (recordzytap) that inline-hooks
+OpenAL-soft's ALCdevice::renderSamples via ByteDance ShadowHook, copies the
+mixed PCM into a lock-free ring buffer, and feeds a hardware AAC encoder muxed as
+a 2nd MP4 track. Resolved the LOCAL symbol from .symtab. Wired ShadowHook in via
+prefab. (Beginning of a long CI/debug sequence.)
+
+------------------------------------------------------------
+
+[Turn 8]
+User: (CI failure) Build fails at configureNdkBuildDebug[x86]: No compatible
+library found //shadowhook/shadowhook.
+
+Claude: ShadowHook only ships arm32/arm64. First guarded the ndk-build module to
+arm only; when the prefab AAR still failed for x86 at the gradle level, switched
+to VENDORING ShadowHook's prebuilt .so + header and linking via
+PREBUILT_SHARED_LIBRARY for arm ABIs only. All ABIs then built.
+
+------------------------------------------------------------
+
+[Turn 9]
+User: Recording: NO AUDIO (not started, hookCalls=0).
+
+Claude: Diagnosed that OpenALAudioTap.start() was never called because a stale
+record_audio=false pref short-circuited the check. Removed the pref gate so the
+tap is always attempted. (Added on-screen toasts reporting audio status,
+hook-call count, and captured-sample count so failures are visible without
+logcat.)
+
+------------------------------------------------------------
+
+[Turn 10]
+User: Recording NO AUDIO (native lib failed to load), hookCalls=0. And: can you
+include the error inside a log file when recording?
+
+Claude: Added RecorderLog, which writes diagnostics to
+Android/data/<pkg>/files/Movies/RecordZy/recordzy-log.txt (device/ABI header,
+audio-tap result incl. the exact native load error, start params, init failures
+with stack trace, stop summary). Also moved libshadowhook.so into jniLibs so AGP
+reliably packages it, and made the loader surface the real UnsatisfiedLinkError.
+
+------------------------------------------------------------
+
+[Turn 11]
+User: (log) JNI_ERR returned from JNI_OnLoad in libshadowhook.so /
+librecordzytap.so.
+
+Claude: Root cause: ShadowHook's JNI_OnLoad does FindClass on its Java class,
+which we didn't ship, so it returned JNI_ERR - failing the load. Gave
+librecordzytap.so its own JNI_OnLoad (so the dependency's loader hook isn't
+invoked) and stopped loading libshadowhook.so explicitly; drove ShadowHook's
+pure-C core directly from native. The library then loaded.
+
+------------------------------------------------------------
+
+[Turn 12]
+User: (log) audio tap ok=false, status="OpenAL symbol not found".
+
+Claude: The game's libopenal.so lives in the JRE's linker namespace, invisible to
+dlopen/dl_iterate_phdr in our app namespace. Switched to locating libopenal.so
+via /proc/self/maps (cross-namespace) and parsing its .symtab/.dynsym on disk to
+resolve the symbol, hooking by absolute address. Added a maps/ELF diagnostic
+dump to the log when resolution fails.
+
+------------------------------------------------------------
+
+[Turn 13]
+User: (log) found .../lwjglVulkan/natives/arm64-v8a/libopenal.so but symbol
+renderSamples not in symtab/dynsym (stripped). At this point just do Option A on
+Method 2, not option B.
+
+Claude: Confirmed the OpenAL the game actually loads (the lwjglVulkan build) is a
+stripped clang-18 +lto+bolt build with no hookable symbols - so route (b) cannot
+work on this device. Switched to OPTION A: build our own OpenAL-soft with the tap
+compiled in.
+  - Added openal-tap/ (recordzy_tap.{h,cpp}: lock-free ring + exported C API) and
+    build.sh, which clones OpenAL-soft 1.23.1 (the version LWJGL 3.3.3 ships),
+    injects recordzy_tap_feed into DeviceBase::renderSamples, adds the tap symbols
+    to the libopenal.version export script, retains them against --gc-sections,
+    builds arm64-v8a + armeabi-v7a, and drops libopenal.so into the native folders.
+  - Added a CI workflow (openal-build.yml) that builds it and commits the rebuilt
+    libopenal.so back. Verified the committed lib exports recordzy_tap_* in .dynsym.
+  - Rewrote app-side recordzytap to remove ShadowHook entirely: it finds the loaded
+    libopenal.so via /proc/self/maps, resolves the exported tap symbols, and calls
+    them. Fixed several CI issues along the way (ninja target name "OpenAL", the
+    renderSamples patch made regex-based, the version-script export, used+retain).
+  - Both "Build OpenAL tap" and "Android CI" (all ABIs) passed. Opened PR #27.
+
+------------------------------------------------------------
+
+[Turn 14]
+User: Has audio but it's SO laggy and delayed - like "br-br-brr" and ~10s delay.
+(log) audio tap ok=true, sampleRate=48000, channels=2; STOP: audio samples
+captured=10611840 over a 55s recording.
+
+Claude: 10,611,840 samples = ~110s of 48kHz stereo for a 55s recording => the tap
+delivers audio at ~2x real time (renders ahead / over-delivers), making the
+audio track twice as long as the video (stutter + growing delay). Fixed by
+pacing the audio pump to the wall clock: feed the AAC encoder at most
+elapsed*sampleRate frames and drop the excess, so audio length matches video
+regardless of the tap's delivery rate. All ABIs built green. Opened PR #28. Asked
+the user to confirm whether the GAME's own audio sounds normal-pitched (2x is
+over-delivery) or fast/high (OpenAL build playing too fast).
+
+------------------------------------------------------------
+
+[Turn 15]
+User: Make a conversation.txt file inside ZalithLauncher-Reborn (main branch,
+where the README is) containing our entire conversation with this transcript
+format, and update it every time you change a mod / ZalithLauncher / FFmpeg.
+
+Claude: Created this conversation.txt on the main branch and will keep it updated
+on subsequent changes to Mod-RecordZy, FFmpegPlugin, or ZalithLauncher-Reborn.
+
+------------------------------------------------------------
+
+KEY OUTCOMES / STATE
+====================
+- Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
+- ZalithLauncher-Reborn built-in recorder:
+  * On-demand GPU tee (zero idle overhead) - PRs #16/#17.
+  * Game audio via a custom OpenAL-soft 1.23.1 build with a compiled-in tap
+    (exported recordzy_tap_* C API), read by recordzytap via /proc/self/maps -
+    PR #27. No ShadowHook, no MediaProjection, no permission prompt.
+  * Wall-clock audio pacing to fix 2x over-capture drift - PR #28.
+  * Diagnostics: on-screen toasts + recordzy-log.txt next to the recordings.
+- Open question at time of writing: whether the game's own audio is normal-pitch
+  (2x is just over-delivery, fixed by pacing) or actually 2x-fast (would need an
+  OpenAL sample-rate fix).

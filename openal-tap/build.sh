@@ -48,6 +48,20 @@ open(p, "w").write(s2)
 print("patched alc/alu.cpp")
 PY
 
+# OpenAL restricts exports via a linker version script (libopenal.version).
+# Add our tap symbols to its global list so they end up in .dynsym.
+python3 - <<'PY'
+p = "libopenal.version"
+s = open(p).read()
+syms = ("    recordzy_tap_feed;\n    recordzy_tap_read;\n"
+        "    recordzy_tap_samplerate;\n    recordzy_tap_channels;\n"
+        "    recordzy_tap_set_active;\n")
+assert "global:" in s, "no global: section in libopenal.version"
+s = s.replace("global:\n", "global:\n" + syms, 1)
+open(p, "w").write(s)
+print("patched libopenal.version")
+PY
+
 cat >> CMakeLists.txt <<'CM'
 
 # ---- RecordZy audio tap (added by openal-tap/build.sh) ----

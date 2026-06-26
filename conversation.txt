@@ -241,6 +241,24 @@ and needs a sample-rate fix rather than a recorder-side workaround.
 
 ------------------------------------------------------------
 
+[Turn 18]
+User: Now it's a bit high-pitched and I can hear crackling noises. And yes, my
+normal Minecraft without recording is perfectly fine. What audio encoder does it
+use?
+
+Claude: Since the GAME audio is normal but the recording is ~2x high-pitched +
+crackly and the tap captures exactly 2x, the tap must be capturing a SECOND
+OpenAL output (e.g. a voice-chat mod's own context) interleaved with the game's,
+doubling/garbling the stream. Fix: recordzy_tap_feed now takes the source device
+pointer; the tap locks onto the first OpenAL device seen after start and ignores
+others; added recordzy_tap_device_count() + logging (devices=) to confirm. Also
+folded in the anti-alias averaging downsampler. Answered the encoder question:
+Android MediaCodec hardware AAC-LC (48kHz stereo) for audio, HEVC (AVC fallback)
+for video, muxed to MP4 via MediaMuxer. OpenAL rebuilt + APK built green on all
+ABIs. Opened PR #31.
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -253,10 +271,10 @@ KEY OUTCOMES / STATE
   * Linear-interpolation resampler to fix choppy/"windy" audio from the 2x
     over-delivery - PR #29 (merged).
   * Anti-alias (averaging) downsample to fix "deep fried" audio - PR #30.
-- Unresolved: the tap consistently captures ~2x real time. If the game's own
-  audio is fast/high-pitched, the custom OpenAL build is playing at ~2x (a
-  sample-rate config issue to fix in the OpenAL build); if the game sounds
-  normal, the recorder-side resampler should now produce correct audio.
+  * Lock the tap to a single OpenAL device (ignore extra contexts) to fix the 2x
+    capture + high-pitch/crackle; adds device-count diagnostics - PR #31.
+- Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)
+  video, MP4 via MediaMuxer.
   * Diagnostics: on-screen toasts + recordzy-log.txt next to the recordings.
 - Open question at time of writing: whether the game's own audio is normal-pitch
   (2x is just over-delivery, fixed by pacing) or actually 2x-fast (would need an

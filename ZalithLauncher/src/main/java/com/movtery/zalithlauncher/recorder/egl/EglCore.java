@@ -28,6 +28,7 @@ public final class EglCore {
     private EGLDisplay mEglDisplay = EGL14.EGL_NO_DISPLAY;
     private EGLContext mEglContext = EGL14.EGL_NO_CONTEXT;
     private EGLConfig mEglConfig = null;
+    private boolean mGles3 = false;
 
     public EglCore(EGLContext sharedContext, int flags) {
         if (mEglDisplay != EGL14.EGL_NO_DISPLAY) {
@@ -51,15 +52,37 @@ public final class EglCore {
         if (config == null) {
             throw new RuntimeException("Unable to find a suitable EGLConfig");
         }
-        int[] attribList = {
-                EGL14.EGL_CONTEXT_CLIENT_VERSION, 2,
-                EGL14.EGL_NONE
-        };
-        EGLContext context = EGL14.eglCreateContext(mEglDisplay, config, sharedContext,
-                attribList, 0);
-        checkEglError("eglCreateContext");
         mEglConfig = config;
+
+        // Prefer a GLES3 context: it's needed for GPU sync fences (glFenceSync /
+        // glWaitSync), which let the dedicated encoder thread safely sample the
+        // frames the display thread renders without a full pipeline stall. Falls
+        // back to GLES2 (no fences) on the rare device that can't provide ES3.
+        int[] attrib3 = {EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE};
+        EGLContext context = EGL14.eglCreateContext(mEglDisplay, config, sharedContext,
+                attrib3, 0);
+        if (context == null || context == EGL14.EGL_NO_CONTEXT) {
+            int[] attrib2 = {EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE};
+            context = EGL14.eglCreateContext(mEglDisplay, config, sharedContext, attrib2, 0);
+            checkEglError("eglCreateContext");
+            mGles3 = false;
+        } else {
+            mGles3 = true;
+        }
+        if (context == null || context == EGL14.EGL_NO_CONTEXT) {
+            throw new RuntimeException("Unable to create EGL context");
+        }
         mEglContext = context;
+    }
+
+    /** The underlying EGL context, so another EglCore can share GL objects with it. */
+    public EGLContext getEglContext() {
+        return mEglContext;
+    }
+
+    /** True if a GLES3 context was created (GPU sync fences are available). */
+    public boolean isGles3() {
+        return mGles3;
     }
 
     private EGLConfig getConfig(int flags) {

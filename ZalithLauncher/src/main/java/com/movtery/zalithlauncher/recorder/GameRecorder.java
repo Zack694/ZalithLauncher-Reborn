@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.SurfaceTexture;
 import android.opengl.EGLSurface;
 import android.opengl.GLES20;
+import android.opengl.GLES30;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
@@ -15,6 +16,7 @@ import android.widget.Toast;
 import com.movtery.zalithlauncher.recorder.egl.EglCore;
 import com.movtery.zalithlauncher.recorder.egl.WindowSurface;
 import com.movtery.zalithlauncher.recorder.gl.TextureBlit;
+import com.movtery.zalithlauncher.recorder.gl.Texture2DBlit;
 import com.movtery.zalithlauncher.recorder.audio.OpenALAudioTap;
 
 import net.kdt.pojavlaunch.utils.JREUtils;
@@ -37,9 +39,14 @@ import java.util.concurrent.CountDownLatch;
  *       the native renderer at it via {@link JREUtils#setupBridgeWindow}.</li>
  *   <li>Once native has released the display surface, the GL thread claims it and
  *       composites every game frame back onto it (so the player still sees the
- *       game) and - paced to the target FPS - onto a hardware
- *       {@link android.media.MediaCodec} encoder input surface (GPU-side scale,
- *       no CPU pixel readback).</li>
+ *       game). Paced to the target FPS, it also renders the frame into one of a
+ *       few shared "relay" textures (a cheap offscreen FBO pass - no surface swap,
+ *       so it never blocks).</li>
+ *   <li>A separate encoder GL thread (sharing the EGL context) samples the most
+ *       recent relay texture and swaps it into the hardware
+ *       {@link android.media.MediaCodec} encoder input surface. Keeping that
+ *       (potentially blocking) swap and any encoder back-pressure on its own
+ *       thread means the live display stays smooth even when the encoder stalls.</li>
  *   <li>On stop, the encoder is flushed, the display surface is handed back to the
  *       native renderer, and all recorder GL resources are released.</li>
  * </ol>
@@ -242,15 +249,33 @@ public final class GameRecorder {
         private Surface captureSurface;
         private final float[] texMatrix = new float[16];
 
-        // Encoder state (render-thread only).
+        // Encoder + relay state.
         private Mp4Muxer muxer;
         private VideoEncoder videoEncoder;
-        private WindowSurface encoderWindow;
         private int encWidth;
         private int encHeight;
         private long frameIntervalNanos = 0;
-        private long lastEncodeNanos = 0;
+        private long lastRelayNanos = 0;
         private long recordStartNanos = 0;
+
+        // Relay: the display thread renders each (paced) frame into one of a few
+        // shared GL_TEXTURE_2D buffers via a cheap FBO pass; a dedicated
+        // EncoderThread (sharing the EGL context) samples the newest one and feeds
+        // the hardware encoder. This keeps the encoder's potentially-blocking
+        // surface swap - and any HW encoder back-pressure - entirely off the
+        // display path, so the live game view never stutters because of encoding.
+        private static final int RELAY_BUFFERS = 3;
+        private EglCore encEglCore;
+        private EncoderThread encoderThread;
+        private int relayFbo = 0;
+        private final int[] relayTex = new int[RELAY_BUFFERS];
+        private final long[] relayFence = new long[RELAY_BUFFERS];
+        private final long[] relayPts = new long[RELAY_BUFFERS];
+        private final Object relayMon = new Object();
+        private int relayReadyIdx = -1;   // newest fully-written buffer (-1 = none)
+        private int relayInUseIdx = -1;   // buffer the encoder currently holds
+        private boolean relayFenceSupported = false;
+        private volatile boolean relayActive = false;
 
         // Audio state (game-audio tap -> AAC), present only when audio is enabled.
         private AudioEncoder audioEncoder;
@@ -411,7 +436,7 @@ public final class GameRecorder {
             int bitrate = prefs.getBitrateKbps() * 1000;
             int fps = prefs.getFps();
             frameIntervalNanos = 1_000_000_000L / Math.max(1, fps);
-            lastEncodeNanos = 0;
+            lastRelayNanos = 0;
 
             // Probe the game-audio tap first so we know whether to add an audio
             // track (the muxer can't start until every expected track is added).
@@ -452,12 +477,25 @@ public final class GameRecorder {
             muxer = new Mp4Muxer(out.getAbsolutePath(), audioOk ? 2 : 1);
 
             videoEncoder = createVideoEncoder(prefs.getMimeType(), targetW, targetH, bitrate, fps);
-            encoderWindow = new WindowSurface(eglCore, videoEncoder.getInputSurface(), false);
+
+            // Relay buffers (shared GL_TEXTURE_2D) + an FBO, created on THIS
+            // (display) context. The encoder thread shares the context, so it can
+            // sample these textures.
+            relayFenceSupported = eglCore.isGles3();
+            setupRelayBuffers();
+
+            // Shared encoder context + its own GL thread. The display thread only
+            // produces relay frames; this thread consumes them into the encoder.
+            encEglCore = new EglCore(eglCore.getEglContext(), EglCore.FLAG_RECORDABLE);
 
             // Common A/V time anchor: video PTS = nanoTime - start; audio PTS is
             // derived from its sample count (also starting at 0).
             recordStartNanos = System.nanoTime();
             videoEncoder.startDraining();
+
+            relayActive = true;
+            encoderThread = new EncoderThread(videoEncoder.getInputSurface());
+            encoderThread.start();
 
             if (audioOk) {
                 drainTapBacklog(); // drop silence/lead-in captured during probing
@@ -613,6 +651,42 @@ public final class GameRecorder {
             }
         }
 
+        // -- relay buffer setup -------------------------------------------
+
+        private void setupRelayBuffers() {
+            int[] fb = new int[1];
+            GLES20.glGenFramebuffers(1, fb, 0);
+            relayFbo = fb[0];
+
+            GLES20.glGenTextures(RELAY_BUFFERS, relayTex, 0);
+            for (int i = 0; i < RELAY_BUFFERS; i++) {
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, relayTex[i]);
+                GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, encWidth, encHeight,
+                        0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
+                GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D,
+                        GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+                GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D,
+                        GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,
+                        GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,
+                        GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+                relayFence[i] = 0;
+                relayPts[i] = 0;
+            }
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
+        }
+
+        /** Pick a relay buffer that's neither the published nor the in-use one. */
+        private int freeRelayIndex(int avoidA, int avoidB) {
+            for (int i = 0; i < RELAY_BUFFERS; i++) {
+                if (i != avoidA && i != avoidB) {
+                    return i;
+                }
+            }
+            return 0;
+        }
+
         // -- per-frame compositing -----------------------------------------
 
         private void drawFrame() {
@@ -627,50 +701,167 @@ public final class GameRecorder {
             }
 
             // 1) Present to the display first (full game resolution) so the player
-            //    sees frames with minimal latency.
+            //    sees frames with minimal latency. This path does NOT touch the
+            //    encoder, so it can never be stalled by encoder back-pressure.
             displayWindow.makeCurrent();
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
             GLES20.glViewport(0, 0, gameWidth, gameHeight);
             blit.draw(texMatrix);
             displayWindow.swapBuffers();
 
-            // 2) Feed the encoder (target resolution, GPU-scaled), paced to the
-            //    target FPS so a high-FPS game doesn't overload the encoder and
-            //    back-pressure the capture queue (which would lag the game).
-            if (encoderWindow != null && videoEncoder != null) {
-                long now = System.nanoTime();
-                boolean encode;
-                if (frameIntervalNanos <= 0 || lastEncodeNanos == 0) {
-                    // Unlimited, or first frame: always encode and anchor cadence.
-                    encode = true;
-                } else {
-                    // Fixed-interval accumulator (NOT "lastEncode = now"). A naive
-                    // >= threshold drops a frame whenever the source is only a little
-                    // faster than the target, and the following frame then arrives
-                    // too soon to qualify - aliasing a 60-72fps game down to ~30-36.
-                    // Accepting frames up to 1/8 interval early absorbs jitter and
-                    // keeps the captured rate locked to the real target.
-                    long tolerance = frameIntervalNanos / 8;
-                    encode = (now - lastEncodeNanos) >= (frameIntervalNanos - tolerance);
-                }
-                if (encode) {
-                    encoderWindow.makeCurrent();
-                    GLES20.glViewport(0, 0, encWidth, encHeight);
-                    blit.draw(texMatrix);
-                    long ptsNanos = now - recordStartNanos;
-                    encoderWindow.setPresentationTime(ptsNanos > 0 ? ptsNanos : 0);
-                    encoderWindow.swapBuffers();
+            // 2) Paced to the target FPS, render the frame into a free relay buffer
+            //    (offscreen FBO pass, target resolution, GPU-scaled - no surface
+            //    swap, so this never blocks). The EncoderThread picks it up.
+            if (!relayActive || relayFbo == 0) {
+                return;
+            }
+            long now = System.nanoTime();
+            boolean due;
+            if (frameIntervalNanos <= 0 || lastRelayNanos == 0) {
+                due = true;
+            } else {
+                long tolerance = frameIntervalNanos / 8;
+                due = (now - lastRelayNanos) >= (frameIntervalNanos - tolerance);
+            }
+            if (!due) {
+                return;
+            }
 
-                    if (frameIntervalNanos <= 0 || lastEncodeNanos == 0) {
-                        lastEncodeNanos = now;
-                    } else {
-                        // Advance by exactly one interval to hold the cadence; if the
-                        // game is slower than target (or we stalled), resync so the
-                        // deadline can't fall arbitrarily far behind.
-                        lastEncodeNanos += frameIntervalNanos;
-                        if (now - lastEncodeNanos > frameIntervalNanos) {
-                            lastEncodeNanos = now;
+            int ready;
+            int inUse;
+            synchronized (relayMon) {
+                ready = relayReadyIdx;
+                inUse = relayInUseIdx;
+            }
+            int w = freeRelayIndex(ready, inUse);
+
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, relayFbo);
+            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                    GLES20.GL_TEXTURE_2D, relayTex[w], 0);
+            GLES20.glViewport(0, 0, encWidth, encHeight);
+            blit.draw(texMatrix);
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+
+            if (relayFenceSupported) {
+                if (relayFence[w] != 0) {
+                    GLES30.glDeleteSync(relayFence[w]);
+                    relayFence[w] = 0;
+                }
+                relayFence[w] = GLES30.glFenceSync(GLES30.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            }
+            GLES20.glFlush(); // make the render visible to the encoder context
+
+            long ptsNanos = now - recordStartNanos;
+            synchronized (relayMon) {
+                relayPts[w] = ptsNanos > 0 ? ptsNanos : 0;
+                relayReadyIdx = w;
+                relayMon.notifyAll();
+            }
+
+            if (frameIntervalNanos <= 0 || lastRelayNanos == 0) {
+                lastRelayNanos = now;
+            } else {
+                lastRelayNanos += frameIntervalNanos;
+                if (now - lastRelayNanos > frameIntervalNanos) {
+                    lastRelayNanos = now;
+                }
+            }
+        }
+
+        // -- dedicated encoder GL thread -----------------------------------
+
+        /**
+         * Consumes relay frames produced by the display thread and swaps them into
+         * the encoder input surface. Runs on its own thread with a shared EGL
+         * context so its (potentially blocking) swap never stalls the display.
+         */
+        private final class EncoderThread extends Thread {
+
+            private final Surface inputSurface;
+            private WindowSurface encWindow;
+            private Texture2DBlit blit2d;
+
+            EncoderThread(Surface inputSurface) {
+                super("RecordZy-Encoder");
+                this.inputSurface = inputSurface;
+            }
+
+            @Override
+            public void run() {
+                try {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY);
+                } catch (Throwable ignored) {
+                }
+                try {
+                    encWindow = new WindowSurface(encEglCore, inputSurface, false);
+                    encWindow.makeCurrent();
+                    blit2d = new Texture2DBlit();
+                } catch (Throwable t) {
+                    Log.e(TAG, "Encoder GL init failed", t);
+                    relayActive = false;
+                    releaseGl();
+                    return;
+                }
+
+                while (relayActive) {
+                    int idx;
+                    long fence;
+                    long pts;
+                    synchronized (relayMon) {
+                        while (relayActive && relayReadyIdx < 0) {
+                            try {
+                                relayMon.wait(50);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            }
                         }
+                        if (!relayActive) {
+                            break;
+                        }
+                        idx = relayReadyIdx;
+                        relayReadyIdx = -1;
+                        relayInUseIdx = idx;
+                        fence = relayFence[idx];
+                        pts = relayPts[idx];
                     }
+                    try {
+                        if (relayFenceSupported && fence != 0) {
+                            // GPU-side wait: order our sampling after the display
+                            // thread's render finished, without blocking the CPU.
+                            GLES30.glWaitSync(fence, 0, GLES30.GL_TIMEOUT_IGNORED);
+                        }
+                        GLES20.glViewport(0, 0, encWidth, encHeight);
+                        blit2d.draw(relayTex[idx]);
+                        encWindow.setPresentationTime(pts > 0 ? pts : 0);
+                        encWindow.swapBuffers(); // may block on encoder; that's fine here
+                    } catch (Throwable t) {
+                        Log.w(TAG, "encoder frame failed", t);
+                    }
+                }
+                releaseGl();
+            }
+
+            private void releaseGl() {
+                try {
+                    if (blit2d != null) {
+                        blit2d.release();
+                        blit2d = null;
+                    }
+                } catch (Throwable ignored) {
+                }
+                try {
+                    if (encWindow != null) {
+                        encWindow.release();
+                        encWindow = null;
+                    }
+                } catch (Throwable ignored) {
+                }
+                try {
+                    if (encEglCore != null) {
+                        encEglCore.release();
+                        encEglCore = null;
+                    }
+                } catch (Throwable ignored) {
                 }
             }
         }
@@ -728,12 +919,19 @@ public final class GameRecorder {
                 audioEncoder = null;
             }
 
-            if (encoderWindow != null) {
+            // Stop the dedicated encoder thread before the codec: it owns the
+            // encoder GL surface (and releases the shared encoder EGL context).
+            relayActive = false;
+            synchronized (relayMon) {
+                relayMon.notifyAll();
+            }
+            if (encoderThread != null) {
                 try {
-                    encoderWindow.release();
-                } catch (Exception ignored) {
+                    encoderThread.join(1000);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
                 }
-                encoderWindow = null;
+                encoderThread = null;
             }
             if (videoEncoder != null) {
                 try {
@@ -759,6 +957,37 @@ public final class GameRecorder {
         }
 
         private void releaseEverything() {
+            // Relay GL objects live on this (display) context.
+            if (relayFbo != 0) {
+                try {
+                    GLES20.glDeleteFramebuffers(1, new int[]{relayFbo}, 0);
+                } catch (Exception ignored) {
+                }
+                relayFbo = 0;
+            }
+            for (int i = 0; i < RELAY_BUFFERS; i++) {
+                if (relayFenceSupported && relayFence[i] != 0) {
+                    try {
+                        GLES30.glDeleteSync(relayFence[i]);
+                    } catch (Exception ignored) {
+                    }
+                    relayFence[i] = 0;
+                }
+            }
+            try {
+                GLES20.glDeleteTextures(RELAY_BUFFERS, relayTex, 0);
+            } catch (Exception ignored) {
+            }
+            // If the encoder thread never started, its shared context is still ours
+            // to release (normally the thread releases it itself).
+            if (encoderThread == null && encEglCore != null) {
+                try {
+                    encEglCore.release();
+                } catch (Exception ignored) {
+                }
+                encEglCore = null;
+            }
+
             if (captureTexture != null) {
                 try {
                     captureTexture.setOnFrameAvailableListener(null);

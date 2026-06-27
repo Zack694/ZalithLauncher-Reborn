@@ -11,7 +11,9 @@ import java.nio.ByteBuffer;
 /**
  * Hardware AAC-LC encoder for the tapped game audio. PCM (interleaved int16) is
  * fed in via {@link #feed}; presentation timestamps are derived from the running
- * sample count so audio stays in sync regardless of how bursty the tap is.
+ * sample count, but continuously re-locked to the wall clock so the audio track
+ * cannot slowly run ahead of the (wall-clock-timestamped) video over a long
+ * recording - dropped/short input would otherwise shrink the audio timeline.
  * Output is drained on a background thread into the shared {@link Mp4Muxer}.
  */
 public final class AudioEncoder {
@@ -31,12 +33,28 @@ public final class AudioEncoder {
     private Thread mDrainThread;
     private long mTotalFrames = 0; // frames = samples / channels, per channel
 
+    // Wall-clock drift correction. The audio PTS is normally driven by the sample
+    // count (smooth), but if it falls behind real elapsed time - e.g. because the
+    // encoder dropped some input, or the tap under-delivered - the timeline is
+    // nudged (or, for a large gap, snapped) forward so it stays locked to the same
+    // wall clock the video uses. This prevents audio creeping ahead of video.
+    private long mBaselineNanos = -1;
+    private final long mSoftDriftFrames;  // start gentle catch-up beyond this
+    private final long mMaxNudgeFrames;    // max catch-up applied per input buffer
+    private final long mHardDriftFrames;  // snap (vs nudge) beyond this
+
     public AudioEncoder(int sampleRate, int channels, int bitRate, Mp4Muxer muxer,
                         long ptsOffsetUs) throws IOException {
         this.mMuxer = muxer;
         this.mSampleRate = sampleRate;
         this.mChannels = Math.max(1, channels);
         this.mPtsOffsetUs = ptsOffsetUs;
+
+        // Drift thresholds, in per-channel frames: gentle correction past ~8ms,
+        // at most ~2ms of catch-up per buffer (inaudible), hard snap past ~300ms.
+        this.mSoftDriftFrames = 8L * sampleRate / 1000L;
+        this.mMaxNudgeFrames = 2L * sampleRate / 1000L;
+        this.mHardDriftFrames = 300L * sampleRate / 1000L;
 
         MediaFormat format = MediaFormat.createAudioFormat(
                 MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, mChannels);
@@ -69,6 +87,12 @@ public final class AudioEncoder {
         if (!mRunning || sampleCount <= 0) {
             return;
         }
+        if (mBaselineNanos < 0) {
+            // Anchor the audio clock the first time real audio is fed. The constant
+            // start offset (and the user's manual A/V delay) is preserved; only the
+            // *rate* is locked to the wall clock from here on.
+            mBaselineNanos = System.nanoTime();
+        }
         int offset = 0;
         while (offset < sampleCount) {
             int inIndex;
@@ -90,6 +114,19 @@ public final class AudioEncoder {
             in.asShortBuffer().put(pcm, offset, chunk);
             in.position(0);
             in.limit(chunk * 2);
+
+            // Re-lock the audio timeline to the wall clock. If the sample-count
+            // clock has fallen behind real elapsed time (which would make audio
+            // play ahead of the video, growing over time), advance the frame
+            // counter to catch up - gently for small drift, snapping for a big gap.
+            long wallFrames = (System.nanoTime() - mBaselineNanos) * mSampleRate
+                    / 1_000_000_000L;
+            long drift = wallFrames - mTotalFrames; // >0: audio behind real time
+            if (drift > mHardDriftFrames) {
+                mTotalFrames = wallFrames;
+            } else if (drift > mSoftDriftFrames) {
+                mTotalFrames += Math.min(drift, mMaxNudgeFrames);
+            }
 
             long ptsUs = mPtsOffsetUs + mTotalFrames * 1_000_000L / mSampleRate;
             mTotalFrames += chunk / mChannels;

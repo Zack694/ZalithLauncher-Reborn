@@ -359,6 +359,24 @@ in-game fps are smoother.
 
 ------------------------------------------------------------
 
+[Turn 25]
+User: Longer video = audio more ahead. Can't we just sync the audio with the
+video / my fps?
+
+Claude: Diagnosed it as a clock-RATE drift (a fixed delay only fixes the start).
+Video frames are timestamped from the wall clock, but audio PTS came purely from
+a sample counter (mTotalFrames/sampleRate); when the AAC encoder had no free
+input buffer, feed() silently dropped samples without counting them, so the audio
+timeline shrank a little with every drop and crept ahead over time. Fix: lock the
+audio clock to the same wall clock the video uses - anchor a baseline on first
+feed (preserving the start offset + manual 103ms delay), then each buffer compare
+the sample position to real elapsed time and, if audio fell behind, advance the
+frame counter to catch up (gentle <=2ms/buffer nudge past ~8ms drift, hard snap
+past 300ms). Monotonic, self-correcting against any drift cause. App-side only,
+independent of #37. PR #38; Android CI + Debug build green on all ABIs.
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -395,6 +413,10 @@ KEY OUTCOMES / STATE
     context) that samples the newest relay texture and does the blocking encoder
     swap off the display path. Triple-buffered handoff + GPU fences
     (glFenceSync/glWaitSync, ES3 context); added Texture2DBlit. PR #37, CI green.
+  * A/V drift fix: audio PTS was sample-count-derived and lost time on dropped
+    encoder input, so audio crept ahead of the wall-clock-timestamped video over
+    long recordings. Audio PTS is now re-locked to the wall clock (gentle nudge /
+    hard snap, monotonic) so the two tracks share one timeline - PR #38.
 - Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
   A/V offset now auto-calibrated.
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)

@@ -338,6 +338,27 @@ Debug build green on all ABIs. A/V delay left as-is (user keeps manual ~103ms).
 
 ------------------------------------------------------------
 
+[Turn 24]
+User: Optimize it to the fucking max - still lagging (in-game fps) and the screen
+looks like 24-30fps even though I'm getting 41-60 in-game. Give 3-5 methods,
+I'll pick 1-2. -> picked Method 1.
+
+Claude: Explained the bottleneck: during recording, ONE GL thread presented every
+frame to the display AND (paced) composited + swapped into the HEVC encoder
+surface; that encoder swap blocks on hardware back-pressure, so the displayed
+rate sagged and the extra GPU work stole time from the game. Offered 5 methods;
+user chose Method 1 (dedicated encoder thread). Implemented it: the display
+thread now only presents + renders each paced frame into one of three shared
+relay textures via a cheap FBO pass (no swap, never blocks); a new encoder GL
+thread (shared EGL context) samples the newest relay texture and performs the
+blocking encoder swap entirely off the display path. Triple-buffered relay with a
+tiny synchronized index handoff + GPU sync fences (glFenceSync/glWaitSync, so
+EglCore now uses an ES3 context); added Texture2DBlit. PR #37; Android CI + Debug
+build green on all ABIs. Needs on-device confirmation that the live view and
+in-game fps are smoother.
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -366,6 +387,14 @@ KEY OUTCOMES / STATE
     is now opt-in; defaults restored to 720p/60fps/8Mbps; frame-pacing rewritten
     with a fixed-interval accumulator to stop 60-72fps aliasing down to ~30fps;
     FPS slider 30-90; encoder B-frames disabled - PR #36.
+  * Method 1 (dedicated encoder thread): recording was still choppy (~24-30fps
+    look) and dropped in-game fps because one GL thread did both display present
+    AND the encoder surface swap (which blocks on HW-encoder back-pressure).
+    Split into a display thread (present + a cheap paced FBO render into one of 3
+    shared relay textures, never blocks) and a separate encoder GL thread (shared
+    context) that samples the newest relay texture and does the blocking encoder
+    swap off the display path. Triple-buffered handoff + GPU fences
+    (glFenceSync/glWaitSync, ES3 context); added Texture2DBlit. PR #37, CI green.
 - Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
   A/V offset now auto-calibrated.
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)

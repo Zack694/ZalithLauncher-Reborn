@@ -605,6 +605,25 @@ FILES:
 
 ------------------------------------------------------------
 
+[Turn 27]
+User: (After discussing noise-cancelling options.) Which is better, #1 or #4?
+-> I have a Poco X6 5G, look up its DSP. -> Do Option 1.
+
+Claude: Confirmed the Poco X6 5G runs the Snapdragon 7s Gen 2 (Qualcomm Hexagon
+DSP + Fluence voice tech), whose hardware noise suppression / echo cancellation
+IS properly exposed through Android's audio-effects framework - so Option 1 is
+the right call (effective, zero CPU/latency, no native build) and Option 4
+(WebRTC APM) isn't worth its build/CPU cost for this device. Implemented Option 1
+in MicCapture: after the mic AudioRecord initializes, attach the device
+NoiseSuppressor and AcousticEchoCanceler to its audio session (both guarded by
+isAvailable() + try/catch, released on stop). Auto-gain (AGC) intentionally left
+off to keep the voice natural. Runs entirely on the Hexagon DSP. Added to PR #39.
+
+FILES:
+- recorder/MicCapture.java (EDITED - attach NoiseSuppressor + AcousticEchoCanceler)
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -645,7 +664,9 @@ KEY OUTCOMES / STATE
     recorder; added a per-button "Voicechat (mic push-to-talk)" toggle in the
     button editor (below Clicker) that records the mic while held and mixes it
     into the game-audio track (new MicCapture, lazy-open, mono AudioRecord)
-    - PR #39 (open, CI green). Noise-cancelling: options given, not yet built.
+    - PR #39 (open, CI green). Mic voice is cleaned by the device's hardware
+    NoiseSuppressor + AcousticEchoCanceler (Option 1, Qualcomm Hexagon DSP,
+    zero CPU/latency; AGC left off) - also PR #39.
 - Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
   A/V offset auto-calibrated (manual ~103ms preferred by the user).
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)

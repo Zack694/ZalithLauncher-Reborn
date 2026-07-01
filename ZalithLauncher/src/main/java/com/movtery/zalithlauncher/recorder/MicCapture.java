@@ -7,6 +7,8 @@ import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import android.media.audiofx.AcousticEchoCanceler;
+import android.media.audiofx.NoiseSuppressor;
 import android.util.Log;
 
 import androidx.core.content.ContextCompat;
@@ -32,6 +34,11 @@ final class MicCapture {
     private Thread readerThread;
     private volatile boolean running = false;
     private volatile boolean active = false;
+
+    // Hardware DSP voice effects (Qualcomm Hexagon on the Snapdragon 7s Gen 2):
+    // noise suppression + acoustic echo cancellation attached to the mic session.
+    private NoiseSuppressor noiseSuppressor;
+    private AcousticEchoCanceler echoCanceler;
 
     // Mono ring buffer (~1s), guarded by `lock`.
     private final Object lock = new Object();
@@ -73,6 +80,7 @@ final class MicCapture {
             record = null;
             return false;
         }
+        applyVoiceEffects(record.getAudioSessionId());
         ring = new short[sampleRate]; // ~1s of mono headroom
         head = tail = count = 0;
         running = true;
@@ -93,6 +101,45 @@ final class MicCapture {
 
     void setActive(boolean a) {
         active = a;
+    }
+
+    /**
+     * Attach the device's built-in DSP voice effects to the mic session. On the
+     * Snapdragon 7s Gen 2 (Qualcomm Hexagon) these run on dedicated hardware, so
+     * they clean up the voice with no extra CPU cost or latency. Guarded by
+     * availability + try/catch since some devices don't expose them.
+     * AGC (auto-gain) is intentionally left off to keep the voice natural
+     * (it tends to pump/breathe).
+     */
+    private void applyVoiceEffects(int sessionId) {
+        try {
+            if (NoiseSuppressor.isAvailable()) {
+                noiseSuppressor = NoiseSuppressor.create(sessionId);
+                if (noiseSuppressor != null) {
+                    noiseSuppressor.setEnabled(true);
+                    Log.i(TAG, "NoiseSuppressor enabled=" + noiseSuppressor.getEnabled());
+                }
+            } else {
+                Log.i(TAG, "NoiseSuppressor not available on this device");
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "NoiseSuppressor attach failed: " + t);
+            noiseSuppressor = null;
+        }
+        try {
+            if (AcousticEchoCanceler.isAvailable()) {
+                echoCanceler = AcousticEchoCanceler.create(sessionId);
+                if (echoCanceler != null) {
+                    echoCanceler.setEnabled(true);
+                    Log.i(TAG, "AcousticEchoCanceler enabled=" + echoCanceler.getEnabled());
+                }
+            } else {
+                Log.i(TAG, "AcousticEchoCanceler not available on this device");
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "AcousticEchoCanceler attach failed: " + t);
+            echoCanceler = null;
+        }
     }
 
     private void readerLoop() {
@@ -158,6 +205,14 @@ final class MicCapture {
                 Thread.currentThread().interrupt();
             }
             readerThread = null;
+        }
+        if (noiseSuppressor != null) {
+            try { noiseSuppressor.release(); } catch (Throwable ignored) {}
+            noiseSuppressor = null;
+        }
+        if (echoCanceler != null) {
+            try { echoCanceler.release(); } catch (Throwable ignored) {}
+            echoCanceler = null;
         }
         if (record != null) {
             try { record.stop(); } catch (Throwable ignored) {}

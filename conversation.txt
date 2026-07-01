@@ -617,7 +617,8 @@ the right call (effective, zero CPU/latency, no native build) and Option 4
 in MicCapture: after the mic AudioRecord initializes, attach the device
 NoiseSuppressor and AcousticEchoCanceler to its audio session (both guarded by
 isAvailable() + try/catch, released on stop). Auto-gain (AGC) intentionally left
-off to keep the voice natural. Runs entirely on the Hexagon DSP. Added to PR #39.
+off to keep the voice natural. Runs entirely on the Hexagon DSP. Shipped as its
+own PR #40 (separate from the merged PR #39, per "a new PR for every update").
 
 FILES:
 - recorder/MicCapture.java (EDITED - attach NoiseSuppressor + AcousticEchoCanceler)
@@ -666,7 +667,7 @@ KEY OUTCOMES / STATE
     into the game-audio track (new MicCapture, lazy-open, mono AudioRecord)
     - PR #39 (open, CI green). Mic voice is cleaned by the device's hardware
     NoiseSuppressor + AcousticEchoCanceler (Option 1, Qualcomm Hexagon DSP,
-    zero CPU/latency; AGC left off) - also PR #39.
+    zero CPU/latency; AGC left off) - PR #40.
 - Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
   A/V offset auto-calibrated (manual ~103ms preferred by the user).
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)

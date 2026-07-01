@@ -10,7 +10,65 @@ FFmpegPlugin, and ZalithLauncher-Reborn (built-in recorder). It is a summary
 transcript of the conversation only, not a dump of any system configuration or
 hidden instructions.
 
-Current date when this file was written: 2026-06-26
+Current date when this file was last written: 2026-07-01
+
+Each turn that changed files lists them under FILES: with a tag of
+(NEW / EDITED / DELETED / REBUILT). Path legend (all under ZalithLauncher/src/main):
+  recorder/*          = java/com/movtery/zalithlauncher/recorder/
+  pojav/*             = java/net/kdt/pojavlaunch/
+  customcontrols/*    = java/net/kdt/pojavlaunch/customcontrols/
+  jni/*               = jni/
+  openal-tap/*        = (repo root) openal-tap/
+  res/*, assets/*     = res/, assets/
+  workflows/*         = (repo root) .github/workflows/
+
+============================================================
+CURRENT FILES (the working set for the built-in recorder)
+============================================================
+Recorder core (recorder/):
+  - recorder/GameRecorder.java          (on-demand GPU tee + encoder thread + audio pump)
+  - recorder/AudioEncoder.java          (AAC-LC encoder, wall-clock A/V drift lock)
+  - recorder/VideoEncoder.java          (HEVC/AVC MediaCodec)
+  - recorder/Mp4Muxer.java              (MediaMuxer wrapper)
+  - recorder/RecorderPrefs.java         (quality/fps/bitrate/codec/A-V-delay prefs)
+  - recorder/RecorderLog.java           (recordzy-log.txt diagnostics)
+  - recorder/MicCapture.java            (push-to-talk mic capture)   [NEW - Turn 26]
+  - recorder/audio/OpenALAudioTap.java  (JNI bridge to the OpenAL tap)
+  - recorder/egl/EglCore.java           (ES3 EGL context, shared for encoder thread)
+  - recorder/egl/WindowSurface.java
+  - recorder/gl/TextureBlit.java        (external-OES blit)
+  - recorder/gl/Texture2DBlit.java      (relay-texture blit, encoder thread)
+Native OpenAL tap:
+  - openal-tap/recordzy_tap.h           (tap C API)
+  - openal-tap/recordzy_tap.cpp         (multi-device mixer + exported read API)
+  - openal-tap/build.sh                 (builds OpenAL-soft 1.23.1 with the tap)
+  - jni/recordzytap/recordzy_audiotap.cpp (resolves tap symbols via /proc/self/maps)
+  - jni/Android.mk
+Launcher integration (pojav/):
+  - pojav/MainActivity.java
+  - pojav/MinecraftGLSurface.java       (on-demand bridge-window hand-off)
+  - pojav/GameMenuSettingsController.java (Special Menu recorder controls)
+  - customcontrols/ControlData.java     (button model, incl. isVoicechatMic)
+  - customcontrols/buttons/ControlButton.java (press/toggle -> setMicHeld)
+  - customcontrols/handleview/EditControlPopup.java (button editor UI)
+Resources / build / CI:
+  - res/layout/view_game_menu.xml
+  - res/layout/dialog_control_button_setting.xml (button editor layout)
+  - res/values/strings.xml, res/values/keycodes.xml
+  - build.gradle.kts, AndroidManifest.xml (RECORD_AUDIO declared)
+  - workflows/openal-build.yml (builds+commits libopenal.so), workflows/android-debug.yml
+Prebuilt binaries (rebuilt by CI):
+  - jniLibs/arm64-v8a/libopenal.so
+  - assets/components/lwjgl3.3.3/natives/{arm64-v8a,armeabi-v7a}/libopenal.so
+  - assets/components/lwjglVulkan/natives/arm64-v8a/libopenal.so
+Docs:
+  - conversation.txt, RecordZy_Full_Transcript.md
+Removed along the way (no longer present):
+  - pojav/recording/GameRecorder.java   (legacy recorder)          [DELETED - Turn 26]
+  - recorder/RecorderOverlay.java, recorder/RecorderProjectionService.java,
+    recorder/VoicechatButton.java       (old overlay/MediaProjection approach)
+  - jniLibs/*/libshadowhook.so, jni/recordzytap/include/shadowhook.h,
+    jni/recordzytap/prebuilt/*/libshadowhook.so (ShadowHook route abandoned)
 
 ============================================================
 
@@ -31,6 +89,13 @@ is never harmed. Fixed EglCore to not eglTerminate the process-shared display.
 Added encoder priority/operating-rate tuning + URGENT_DISPLAY GL thread, and
 removed the old "enable + relaunch" toggle. CI (all ABIs) passed. Opened PR #16.
 
+FILES:
+- recorder/GameRecorder.java (EDITED)
+- recorder/egl/EglCore.java (EDITED)
+- pojav/MinecraftGLSurface.java (EDITED)
+- pojav/GameMenuSettingsController.java (EDITED)
+- res/layout/view_game_menu.xml (EDITED)
+
 ------------------------------------------------------------
 
 [Turn 2]
@@ -38,6 +103,8 @@ User: Create a new pr
 
 Claude: Created a fresh branch and opened PR #17 with the same verified
 on-demand-tee optimization commit.
+
+FILES: (none - re-opened the same commit as a new PR)
 
 ------------------------------------------------------------
 
@@ -54,6 +121,8 @@ Claude: Gave three options for capturing game audio in ZalithLauncher:
       clean game feed.
 Recommended (1); noted (2) as the "purist" option.
 
+FILES: (none - discussion only)
+
 ------------------------------------------------------------
 
 [Turn 4]
@@ -68,6 +137,8 @@ OpenAL tap). Also explained the microstutters: recording at 45fps against a
 ~60fps game creates an uneven 3:4 cadence where some displayed frames do double
 GPU work - recommended using 30fps (a clean divisor) instead of 45.
 
+FILES: (none - discussion only)
+
 ------------------------------------------------------------
 
 [Turn 5]
@@ -77,6 +148,8 @@ Claude: Explained that an OpenAL tap couples to a specific libopenal.so build
 (internal symbols/ABI), so a launcher OpenAL update could break a runtime hook;
 contrasted with Method 1 riding a stable Android API. Noted breakage would be
 graceful (fall back to video-only), not a crash.
+
+FILES: (none - discussion only)
 
 ------------------------------------------------------------
 
@@ -90,6 +163,8 @@ OpenSL backend - so a tap is feasible, with the real cost being a native build
 (no source in the repo). Laid out Method 2 route (a) rebuild-from-source vs
 route (b) lightweight runtime hook.
 
+FILES: (none - investigation only)
+
 ------------------------------------------------------------
 
 [Turn 7]
@@ -100,6 +175,14 @@ OpenAL-soft's ALCdevice::renderSamples via ByteDance ShadowHook, copies the
 mixed PCM into a lock-free ring buffer, and feeds a hardware AAC encoder muxed as
 a 2nd MP4 track. Resolved the LOCAL symbol from .symtab. Wired ShadowHook in via
 prefab. (Beginning of a long CI/debug sequence.)
+
+FILES:
+- jni/recordzytap/recordzy_audiotap.cpp (NEW)
+- jni/Android.mk (EDITED)
+- recorder/audio/OpenALAudioTap.java (NEW)
+- recorder/AudioEncoder.java (NEW)
+- recorder/GameRecorder.java (EDITED)
+- build.gradle.kts (EDITED - ShadowHook prefab)
 
 ------------------------------------------------------------
 
@@ -112,6 +195,13 @@ arm only; when the prefab AAR still failed for x86 at the gradle level, switched
 to VENDORING ShadowHook's prebuilt .so + header and linking via
 PREBUILT_SHARED_LIBRARY for arm ABIs only. All ABIs then built.
 
+FILES:
+- jni/Android.mk (EDITED)
+- build.gradle.kts (EDITED - drop prefab, use vendored .so)
+- jni/recordzytap/prebuilt/arm64-v8a/libshadowhook.so (NEW - later removed)
+- jni/recordzytap/prebuilt/armeabi-v7a/libshadowhook.so (NEW - later removed)
+- jni/recordzytap/include/shadowhook.h (NEW - later removed)
+
 ------------------------------------------------------------
 
 [Turn 9]
@@ -122,6 +212,9 @@ record_audio=false pref short-circuited the check. Removed the pref gate so the
 tap is always attempted. (Added on-screen toasts reporting audio status,
 hook-call count, and captured-sample count so failures are visible without
 logcat.)
+
+FILES:
+- recorder/GameRecorder.java (EDITED)
 
 ------------------------------------------------------------
 
@@ -135,6 +228,14 @@ audio-tap result incl. the exact native load error, start params, init failures
 with stack trace, stop summary). Also moved libshadowhook.so into jniLibs so AGP
 reliably packages it, and made the loader surface the real UnsatisfiedLinkError.
 
+FILES:
+- recorder/RecorderLog.java (NEW)
+- recorder/audio/OpenALAudioTap.java (EDITED)
+- recorder/GameRecorder.java (EDITED)
+- build.gradle.kts (EDITED)
+- jniLibs/arm64-v8a/libshadowhook.so (NEW - later removed)
+- jniLibs/armeabi-v7a/libshadowhook.so (NEW - later removed)
+
 ------------------------------------------------------------
 
 [Turn 11]
@@ -147,6 +248,10 @@ librecordzytap.so its own JNI_OnLoad (so the dependency's loader hook isn't
 invoked) and stopped loading libshadowhook.so explicitly; drove ShadowHook's
 pure-C core directly from native. The library then loaded.
 
+FILES:
+- jni/recordzytap/recordzy_audiotap.cpp (EDITED)
+- recorder/audio/OpenALAudioTap.java (EDITED)
+
 ------------------------------------------------------------
 
 [Turn 12]
@@ -157,6 +262,11 @@ dlopen/dl_iterate_phdr in our app namespace. Switched to locating libopenal.so
 via /proc/self/maps (cross-namespace) and parsing its .symtab/.dynsym on disk to
 resolve the symbol, hooking by absolute address. Added a maps/ELF diagnostic
 dump to the log when resolution fails.
+
+FILES:
+- jni/recordzytap/recordzy_audiotap.cpp (EDITED)
+- recorder/audio/OpenALAudioTap.java (EDITED)
+- recorder/GameRecorder.java (EDITED)
 
 ------------------------------------------------------------
 
@@ -182,6 +292,21 @@ compiled in.
     renderSamples patch made regex-based, the version-script export, used+retain).
   - Both "Build OpenAL tap" and "Android CI" (all ABIs) passed. Opened PR #27.
 
+FILES:
+- openal-tap/recordzy_tap.h (NEW)
+- openal-tap/recordzy_tap.cpp (NEW)
+- openal-tap/build.sh (NEW)
+- workflows/openal-build.yml (NEW)
+- jni/recordzytap/recordzy_audiotap.cpp (EDITED - drop ShadowHook, maps+dynsym)
+- jni/Android.mk (EDITED)
+- build.gradle.kts (EDITED)
+- recorder/audio/OpenALAudioTap.java (EDITED)
+- jniLibs/arm64-v8a/libshadowhook.so (DELETED)
+- jniLibs/armeabi-v7a/libshadowhook.so (DELETED)
+- jni/recordzytap/include/shadowhook.h (DELETED)
+- jni/recordzytap/prebuilt/*/libshadowhook.so (DELETED)
+- assets/.../libopenal.so + jniLibs/arm64-v8a/libopenal.so (REBUILT by CI)
+
 ------------------------------------------------------------
 
 [Turn 14]
@@ -198,6 +323,9 @@ regardless of the tap's delivery rate. All ABIs built green. Opened PR #28. Aske
 the user to confirm whether the GAME's own audio sounds normal-pitched (2x is
 over-delivery) or fast/high (OpenAL build playing too fast).
 
+FILES:
+- recorder/GameRecorder.java (EDITED)
+
 ------------------------------------------------------------
 
 [Turn 15]
@@ -207,6 +335,9 @@ format, and update it every time you change a mod / ZalithLauncher / FFmpeg.
 
 Claude: Created this conversation.txt on the main branch and will keep it updated
 on subsequent changes to Mod-RecordZy, FFmpegPlugin, or ZalithLauncher-Reborn.
+
+FILES:
+- conversation.txt (NEW)
 
 ------------------------------------------------------------
 
@@ -221,8 +352,9 @@ resampler: output paced to the wall clock (sampleRate frames/sec), read cursor
 advancing through buffered input at the measured ~2x input/output ratio with
 interpolation, plus a backlog cap to bound latency. Smooth, continuous, in-sync
 audio regardless of the tap's delivery rate. CI green on all ABIs. Opened PR #29.
-(Still open: if the audio is smooth but fast/high-pitched, the custom OpenAL
-build is playing ~2x and needs a sample-rate fix; if normal, done.)
+
+FILES:
+- recorder/GameRecorder.java (EDITED)
 
 ------------------------------------------------------------
 
@@ -238,6 +370,9 @@ input samples before decimating. CI green. Opened PR #30. Reiterated the
 decisive open question: does the GAME's own audio (not the recording) sound
 normal vs fast/high-pitched - if fast, the custom OpenAL build is playing at ~2x
 and needs a sample-rate fix rather than a recorder-side workaround.
+
+FILES:
+- recorder/GameRecorder.java (EDITED)
 
 ------------------------------------------------------------
 
@@ -257,6 +392,15 @@ Android MediaCodec hardware AAC-LC (48kHz stereo) for audio, HEVC (AVC fallback)
 for video, muxed to MP4 via MediaMuxer. OpenAL rebuilt + APK built green on all
 ABIs. Opened PR #31.
 
+FILES:
+- openal-tap/recordzy_tap.h (EDITED)
+- openal-tap/recordzy_tap.cpp (EDITED)
+- openal-tap/build.sh (EDITED)
+- jni/recordzytap/recordzy_audiotap.cpp (EDITED)
+- recorder/audio/OpenALAudioTap.java (EDITED)
+- recorder/GameRecorder.java (EDITED)
+- assets/.../libopenal.so + jniLibs/arm64-v8a/libopenal.so (REBUILT by CI)
+
 ------------------------------------------------------------
 
 [Turn 19]
@@ -270,6 +414,10 @@ OpenAL device's PCM onto a shared timeline (aligned frames, ~25ms lag), so the
 recording contains the game audio (and any other context like voice chat) as one
 real-time 1x stream - no wrong-device silence, no 2x, no resampling artifacts.
 OpenAL rebuilt + APK built green on all ABIs. Opened PR #32.
+
+FILES:
+- openal-tap/recordzy_tap.cpp (EDITED - multi-device mixer)
+- assets/.../libopenal.so + jniLibs/arm64-v8a/libopenal.so (REBUILT by CI)
 
 ------------------------------------------------------------
 
@@ -285,6 +433,14 @@ line it up (device-specific, tunable). Video: enabled MediaCodec low-latency
 mode (KEY_LATENCY=1, API 30+) on the HEVC encoder so it returns frames faster
 and back-pressures the GL compositor less. CI green on all ABIs. Opened PR #33.
 
+FILES:
+- recorder/AudioEncoder.java (EDITED)
+- recorder/GameRecorder.java (EDITED)
+- recorder/RecorderPrefs.java (EDITED)
+- recorder/VideoEncoder.java (EDITED)
+- pojav/GameMenuSettingsController.java (EDITED)
+- res/layout/view_game_menu.xml (EDITED)
+
 ------------------------------------------------------------
 
 [Turn 21]
@@ -297,6 +453,17 @@ AUTO-calibration: the OpenAL tap now reports the device's output buffer latency
 uses it as the audio delay automatically. The slider now defaults to 0 = Auto;
 a positive value overrides (useful for Bluetooth). OpenAL rebuilt + APK green on
 all ABIs. Opened PR #34 (supersedes #33).
+
+FILES:
+- openal-tap/recordzy_tap.h (EDITED)
+- openal-tap/recordzy_tap.cpp (EDITED)
+- openal-tap/build.sh (EDITED)
+- jni/recordzytap/recordzy_audiotap.cpp (EDITED)
+- recorder/audio/OpenALAudioTap.java (EDITED)
+- recorder/GameRecorder.java (EDITED)
+- recorder/RecorderPrefs.java (EDITED)
+- pojav/GameMenuSettingsController.java (EDITED)
+- assets/.../libopenal.so + jniLibs/arm64-v8a/libopenal.so (REBUILT by CI)
 
 ------------------------------------------------------------
 
@@ -315,6 +482,9 @@ systemOutputLatencyMs() helper. App-side only (no OpenAL rebuild); Android CI
 green on b69488e. PR #34 was already merged, so this landed as a new PR #35 on
 branch feat/recorder-avsync-syslatency. If auto is still off the manual slider
 (>0) overrides it.
+
+FILES:
+- recorder/GameRecorder.java (EDITED)
 
 ------------------------------------------------------------
 
@@ -335,6 +505,13 @@ accumulator (+1/8-interval jitter tolerance, resync guard) so the captured rate
 locks to the real target; FPS slider remapped to 30-90; VideoEncoder disables
 B-frames (KEY_MAX_B_FRAMES=0) to cut latency/back-pressure. PR #36, Android CI +
 Debug build green on all ABIs. A/V delay left as-is (user keeps manual ~103ms).
+
+FILES:
+- recorder/GameRecorder.java (EDITED)
+- recorder/RecorderPrefs.java (EDITED)
+- recorder/VideoEncoder.java (EDITED)
+- pojav/GameMenuSettingsController.java (EDITED)
+- res/layout/view_game_menu.xml (EDITED)
 
 ------------------------------------------------------------
 
@@ -357,6 +534,11 @@ EglCore now uses an ES3 context); added Texture2DBlit. PR #37; Android CI + Debu
 build green on all ABIs. Needs on-device confirmation that the live view and
 in-game fps are smoother.
 
+FILES:
+- recorder/GameRecorder.java (EDITED)
+- recorder/egl/EglCore.java (EDITED - ES3 context)
+- recorder/gl/Texture2DBlit.java (NEW)
+
 ------------------------------------------------------------
 
 [Turn 25]
@@ -374,6 +556,52 @@ the sample position to real elapsed time and, if audio fell behind, advance the
 frame counter to catch up (gentle <=2ms/buffer nudge past ~8ms drift, hard snap
 past 300ms). Monotonic, self-correcting against any drift cause. App-side only,
 independent of #37. PR #38; Android CI + Debug build green on all ABIs.
+
+FILES:
+- recorder/AudioEncoder.java (EDITED)
+
+------------------------------------------------------------
+
+[Turn 26]
+User: It's perfect / audio works even on long videos. Now: (a) remove the Special
+Voicechat, Special Start/Stop, and Special Pause keybinds - they're useless;
+(b) add "Voicechat" back as a per-button toggle (below the Clicker toggle in the
+button editor) so holding/toggling that button records my mic (push-to-talk);
+(c) is noise-cancelling possible? give methods first, don't implement yet; and
+(d) list the changed files inside conversation.txt (FILES: - File (NEW/EDITED/
+DELETED)) per turn, with the current files at the very top. Also: always create a
+PR, don't push/commit to main directly.
+
+Claude: (a) Removed the three "Special" recorder keybinds (Recording Start/Stop,
+Recording Pause, Voicechat Button): deleted the SPECIALBTN_RECORDING/_PAUSE/
+_VOICECHAT_MIC constants + picker entries, the ControlButton cases, the
+MainActivity hooks, and the keycode strings; deleted the now-unused legacy
+recorder (pojav/recording/GameRecorder.java). (b) Added a per-button "Voicechat
+(mic push-to-talk)" toggle directly below the Clicker toggle in the button
+editor (ControlData.isVoicechatMic + editor switch + opt-in RECORD_AUDIO
+request). While a flagged button is held/toggled on, ControlButton calls
+GameRecorder.setMicHeld(true); the recorder's audio pump lazily opens the mic
+(new MicCapture: mono AudioRecord at the tap's sample rate) only on first use,
+mixes the mono mic into the interleaved game-audio frames (summed + clamped)
+before AAC encoding, and tears the mic down on stop. Mic mixes into the existing
+game-audio track (present when the OpenAL tap is active). (c) Provided
+noise-cancelling method options (list only, not implemented). (d) Restructured
+this conversation.txt with a CURRENT FILES section at the top and per-turn FILES
+blocks. Delivered on branch feat/recorder-ptt-mic as PR #39 (NOT pushed to main);
+Android CI + Debug build green on all ABIs.
+
+FILES:
+- recorder/MicCapture.java (NEW)
+- recorder/GameRecorder.java (EDITED - setMicHeld, lazy mic init, mixMic, teardown)
+- customcontrols/ControlData.java (EDITED - isVoicechatMic field + copy; removed 3 special consts)
+- customcontrols/buttons/ControlButton.java (EDITED - setMicHeld hook; removed 3 special cases)
+- customcontrols/handleview/EditControlPopup.java (EDITED - Voicechat switch + mic permission)
+- pojav/MainActivity.java (EDITED - removed toggleGameRecording/Pause hooks + import)
+- pojav/recording/GameRecorder.java (DELETED - legacy recorder)
+- res/layout/dialog_control_button_setting.xml (EDITED - checkboxVoicechat below Clicker)
+- res/values/strings.xml (EDITED - customctrl_voicechat)
+- res/values/keycodes.xml (EDITED - removed 3 special recording strings)
+- conversation.txt (EDITED - FILES change-log format + current files)
 
 ------------------------------------------------------------
 
@@ -400,28 +628,26 @@ KEY OUTCOMES / STATE
     automatically (slider 0 = Auto, positive = manual override) - PR #34.
     Refined to add Android system output latency (AudioManager.getOutputLatency)
     on top of OpenAL's buffer latency, since OpenAL's value alone under-shot
-    - PR #35.
+    - PR #35. (User settled on a manual ~103ms.)
   * 60fps fix + optimization: performance mode (which silently capped FPS to 30)
     is now opt-in; defaults restored to 720p/60fps/8Mbps; frame-pacing rewritten
     with a fixed-interval accumulator to stop 60-72fps aliasing down to ~30fps;
     FPS slider 30-90; encoder B-frames disabled - PR #36.
-  * Method 1 (dedicated encoder thread): recording was still choppy (~24-30fps
-    look) and dropped in-game fps because one GL thread did both display present
-    AND the encoder surface swap (which blocks on HW-encoder back-pressure).
-    Split into a display thread (present + a cheap paced FBO render into one of 3
-    shared relay textures, never blocks) and a separate encoder GL thread (shared
-    context) that samples the newest relay texture and does the blocking encoder
-    swap off the display path. Triple-buffered handoff + GPU fences
-    (glFenceSync/glWaitSync, ES3 context); added Texture2DBlit. PR #37, CI green.
-  * A/V drift fix: audio PTS was sample-count-derived and lost time on dropped
-    encoder input, so audio crept ahead of the wall-clock-timestamped video over
-    long recordings. Audio PTS is now re-locked to the wall clock (gentle nudge /
-    hard snap, monotonic) so the two tracks share one timeline - PR #38.
+  * Method 1 (dedicated encoder thread): split the single GL thread into a
+    display thread (present + cheap paced FBO render into 1 of 3 shared relay
+    textures, never blocks) and a separate encoder GL thread (shared context)
+    that does the blocking encoder swap off the display path. Triple-buffered
+    handoff + GPU fences (ES3 context); added Texture2DBlit - PR #37.
+  * A/V drift fix: audio PTS re-locked to the wall clock (gentle nudge / hard
+    snap, monotonic) so the two tracks share one timeline over long recordings
+    - PR #38.
+  * Push-to-talk mic: removed the 3 "Special" recorder keybinds + the legacy
+    recorder; added a per-button "Voicechat (mic push-to-talk)" toggle in the
+    button editor (below Clicker) that records the mic while held and mixes it
+    into the game-audio track (new MicCapture, lazy-open, mono AudioRecord)
+    - PR #39 (open, CI green). Noise-cancelling: options given, not yet built.
 - Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
-  A/V offset now auto-calibrated.
+  A/V offset auto-calibrated (manual ~103ms preferred by the user).
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)
   video, MP4 via MediaMuxer.
   * Diagnostics: on-screen toasts + recordzy-log.txt next to the recordings.
-- Open question at time of writing: whether the game's own audio is normal-pitch
-  (2x is just over-delivery, fixed by pacing) or actually 2x-fast (would need an
-  OpenAL sample-rate fix).

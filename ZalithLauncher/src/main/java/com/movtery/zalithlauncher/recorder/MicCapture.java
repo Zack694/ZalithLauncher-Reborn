@@ -7,8 +7,6 @@ import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
-import android.media.audiofx.AcousticEchoCanceler;
-import android.media.audiofx.NoiseSuppressor;
 import android.util.Log;
 
 import androidx.core.content.ContextCompat;
@@ -17,12 +15,27 @@ import androidx.core.content.ContextCompat;
  * Captures the microphone (mono, 16-bit PCM) on a background thread into a small
  * ring buffer, for push-to-talk mixing into the game recording.
  *
- * <p>The recorder audio pump only pulls samples while the PTT button is held.
- * When it isn't held the reader keeps {@link AudioRecord} drained but discards
- * the data (and clears any backlog), so pressing the button always starts from
- * live audio with no stale lag.</p>
+ * <p>Design notes:</p>
+ * <ul>
+ *   <li><b>No hardware NoiseSuppressor / AcousticEchoCanceler.</b> On this device
+ *       those forced a "voice-comms" path that made the mic sound hollow/robotic
+ *       ("pilot's mic") and added latency, while still failing to cancel game
+ *       audio (Android's AEC references the phone-call downlink, not the game's
+ *       media output). We use the raw mic instead.</li>
+ *   <li><b>Low latency.</b> A small AudioRecord buffer plus a capped ring backlog
+ *       keep the captured voice close to real time so it stays aligned with the
+ *       game audio it's mixed into (no drift/delay).</li>
+ *   <li><b>Gentle noise gate.</b> An envelope-follower gate (fast attack, slow
+ *       release, short hold) mutes the mic below a threshold, so idle hiss and
+ *       quiet game-speaker bleed between words are removed - without any spectral
+ *       processing artifacts. Loud bleed during speech still passes (use
+ *       headphones to eliminate speaker->mic bleed entirely).</li>
+ * </ul>
  *
- * <p>All heavy work runs on the dedicated reader thread — never the UI thread.</p>
+ * <p>The recorder audio pump only pulls samples while the PTT button is held;
+ * when it isn't, the reader keeps AudioRecord drained but discards the data (and
+ * clears any backlog), so each press starts from fresh, live audio. All heavy
+ * work runs on the dedicated reader thread - never the UI thread.</p>
  */
 final class MicCapture {
     private static final String TAG = "RecordZyMic";
@@ -30,24 +43,36 @@ final class MicCapture {
     private final Context appContext;
     private final int sampleRate;
 
+    // Max mic latency we tolerate before dropping the oldest samples (~120ms).
+    private final int maxBacklog;
+
     private AudioRecord record;
     private Thread readerThread;
     private volatile boolean running = false;
     private volatile boolean active = false;
 
-    // Hardware DSP voice effects (Qualcomm Hexagon on the Snapdragon 7s Gen 2):
-    // noise suppression + acoustic echo cancellation attached to the mic session.
-    private NoiseSuppressor noiseSuppressor;
-    private AcousticEchoCanceler echoCanceler;
-
-    // Mono ring buffer (~1s), guarded by `lock`.
+    // Mono ring buffer, guarded by `lock`.
     private final Object lock = new Object();
     private short[] ring;
     private int head, tail, count;
 
+    // --- Noise gate state (reader thread only) ---
+    // Threshold in 16-bit amplitude. ~500/32768 ~= -36 dBFS: normal speech opens
+    // the gate easily; idle hiss / quiet bleed stays below it and is muted.
+    private static final float GATE_OPEN_AMP = 500f;
+    private static final float ENV_DECAY = 0.9997f; // envelope release per sample
+    private static final float ATTACK = 0.05f;      // gain rise (fast, ~ms)
+    private static final float RELEASE = 0.0006f;    // gain fall (slow, ~35ms)
+    private float gateEnv = 0f;   // running amplitude envelope
+    private float gateGain = 0f;  // smoothed 0..1 gain applied to samples
+    private int gateHold = 0;     // samples to keep the gate open after last peak
+    private final int gateHoldSamples;
+
     MicCapture(Context context, int sampleRate) {
         this.appContext = context.getApplicationContext();
         this.sampleRate = sampleRate > 0 ? sampleRate : 48000;
+        this.maxBacklog = Math.max(512, this.sampleRate / 8);   // ~125ms
+        this.gateHoldSamples = this.sampleRate / 6;             // ~160ms hold
     }
 
     boolean hasPermission() {
@@ -64,11 +89,13 @@ final class MicCapture {
         }
         int minBuf = AudioRecord.getMinBufferSize(sampleRate,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        if (minBuf <= 0) minBuf = sampleRate * 2;
+        if (minBuf <= 0) minBuf = 8192;
         try {
+            // Small buffer (a few chunks) to keep capture latency low; the reader
+            // drains it continuously so it never overflows.
             record = new AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
-                    Math.max(minBuf, sampleRate) * 2);
+                    Math.max(minBuf * 2, 8192));
         } catch (Throwable t) {
             Log.w(TAG, "AudioRecord create failed: " + t);
             record = null;
@@ -80,9 +107,11 @@ final class MicCapture {
             record = null;
             return false;
         }
-        applyVoiceEffects(record.getAudioSessionId());
-        ring = new short[sampleRate]; // ~1s of mono headroom
+        ring = new short[Math.max(maxBacklog * 4, sampleRate / 2)];
         head = tail = count = 0;
+        gateEnv = 0f;
+        gateGain = 0f;
+        gateHold = 0;
         running = true;
         try {
             record.startRecording();
@@ -95,51 +124,12 @@ final class MicCapture {
         }
         readerThread = new Thread(this::readerLoop, "RecordZy-Mic");
         readerThread.start();
-        Log.i(TAG, "Mic capture started @" + sampleRate + "Hz mono");
+        Log.i(TAG, "Mic capture started @" + sampleRate + "Hz mono (raw, gated, low-latency)");
         return true;
     }
 
     void setActive(boolean a) {
         active = a;
-    }
-
-    /**
-     * Attach the device's built-in DSP voice effects to the mic session. On the
-     * Snapdragon 7s Gen 2 (Qualcomm Hexagon) these run on dedicated hardware, so
-     * they clean up the voice with no extra CPU cost or latency. Guarded by
-     * availability + try/catch since some devices don't expose them.
-     * AGC (auto-gain) is intentionally left off to keep the voice natural
-     * (it tends to pump/breathe).
-     */
-    private void applyVoiceEffects(int sessionId) {
-        try {
-            if (NoiseSuppressor.isAvailable()) {
-                noiseSuppressor = NoiseSuppressor.create(sessionId);
-                if (noiseSuppressor != null) {
-                    noiseSuppressor.setEnabled(true);
-                    Log.i(TAG, "NoiseSuppressor enabled=" + noiseSuppressor.getEnabled());
-                }
-            } else {
-                Log.i(TAG, "NoiseSuppressor not available on this device");
-            }
-        } catch (Throwable t) {
-            Log.w(TAG, "NoiseSuppressor attach failed: " + t);
-            noiseSuppressor = null;
-        }
-        try {
-            if (AcousticEchoCanceler.isAvailable()) {
-                echoCanceler = AcousticEchoCanceler.create(sessionId);
-                if (echoCanceler != null) {
-                    echoCanceler.setEnabled(true);
-                    Log.i(TAG, "AcousticEchoCanceler enabled=" + echoCanceler.getEnabled());
-                }
-            } else {
-                Log.i(TAG, "AcousticEchoCanceler not available on this device");
-            }
-        } catch (Throwable t) {
-            Log.w(TAG, "AcousticEchoCanceler attach failed: " + t);
-            echoCanceler = null;
-        }
     }
 
     private void readerLoop() {
@@ -161,13 +151,17 @@ final class MicCapture {
                 continue;
             }
             if (!active) {
-                // Keep the mic drained but discard, and clear the backlog so the
-                // next press starts from fresh, live audio.
+                // Keep the mic drained but discard, clear the backlog and reset the
+                // gate so the next press starts from fresh, live, closed-gate audio.
                 synchronized (lock) {
                     head = tail = count = 0;
                 }
+                gateEnv = 0f;
+                gateGain = 0f;
+                gateHold = 0;
                 continue;
             }
+            applyGate(buf, n);
             synchronized (lock) {
                 for (int i = 0; i < n; i++) {
                     if (count == ring.length) {
@@ -178,7 +172,32 @@ final class MicCapture {
                     tail = (tail + 1) % ring.length;
                     count++;
                 }
+                // Keep latency bounded: if the consumer fell behind, drop the
+                // oldest samples so the mic never lags the game audio.
+                if (count > maxBacklog) {
+                    int drop = count - maxBacklog;
+                    head = (head + drop) % ring.length;
+                    count -= drop;
+                }
             }
+        }
+    }
+
+    /** In-place noise gate: mute samples while the envelope is below threshold. */
+    private void applyGate(short[] buf, int n) {
+        for (int i = 0; i < n; i++) {
+            float a = Math.abs(buf[i]);
+            // Peak-hold envelope with slow decay.
+            gateEnv = a > gateEnv ? a : gateEnv * ENV_DECAY;
+            if (gateEnv > GATE_OPEN_AMP) {
+                gateHold = gateHoldSamples;
+            } else if (gateHold > 0) {
+                gateHold--;
+            }
+            float target = gateHold > 0 ? 1f : 0f;
+            float coef = target > gateGain ? ATTACK : RELEASE;
+            gateGain += (target - gateGain) * coef;
+            buf[i] = (short) (buf[i] * gateGain);
         }
     }
 
@@ -205,14 +224,6 @@ final class MicCapture {
                 Thread.currentThread().interrupt();
             }
             readerThread = null;
-        }
-        if (noiseSuppressor != null) {
-            try { noiseSuppressor.release(); } catch (Throwable ignored) {}
-            noiseSuppressor = null;
-        }
-        if (echoCanceler != null) {
-            try { echoCanceler.release(); } catch (Throwable ignored) {}
-            echoCanceler = null;
         }
         if (record != null) {
             try { record.stop(); } catch (Throwable ignored) {}

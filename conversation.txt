@@ -625,6 +625,37 @@ FILES:
 
 ------------------------------------------------------------
 
+[Turn 28]
+User: The noise/echo cancellation doesn't work - the mic is delayed and sounds
+like "Backrooms Level 0 lights + a pilot's mic", and I can still hear the game's
+echo recorded. Can you fix it? (Then: the PR has merge conflicts, fix them.)
+
+Claude: Those symptoms are the signature of Android's AcousticEchoCanceler (and
+aggressive NoiseSuppressor) on a raw mic: it forces a processed voice-comms path
+that narrowbands/robotizes the voice ("pilot's mic") and adds latency, while NOT
+cancelling the game audio (Android's AEC references the phone-call downlink, not
+the game's media output) - so the speaker->mic echo is still recorded. Option 1
+(PR #40, which the user had merged) backfired on this device. Fix (PR #41):
+dropped the hardware NS/AEC that PR #40 added and instead:
+  - Low latency: smaller AudioRecord buffer + a capped ring backlog (~120ms) that
+    drops the oldest samples if the consumer falls behind, so the mic stays live
+    and aligned with the game audio (fixes the delay).
+  - Gentle noise gate: an envelope-follower gate (fast attack, slow release,
+    ~160ms hold, ~-36 dBFS threshold) mutes the mic below threshold - removing
+    idle hiss and quiet game-speaker bleed between words with NO spectral
+    artifacts (no more "pilot's mic").
+Honest limit: loud game bleed DURING speech still passes (the mic physically
+hears the speakers); headphones eliminate it completely, or a future
+reference-based AEC (using the game-audio tap as the far-end) could cancel it.
+PR #41 was rebased onto main after PR #40 merged (resolving the conflict in
+MicCapture.java / conversation.txt).
+
+FILES:
+- recorder/MicCapture.java (EDITED - remove hardware NS/AEC; low-latency backlog cap; noise gate)
+- conversation.txt (EDITED - Turn 28)
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -665,9 +696,10 @@ KEY OUTCOMES / STATE
     recorder; added a per-button "Voicechat (mic push-to-talk)" toggle in the
     button editor (below Clicker) that records the mic while held and mixes it
     into the game-audio track (new MicCapture, lazy-open, mono AudioRecord)
-    - PR #39 (open, CI green). Mic voice is cleaned by the device's hardware
-    NoiseSuppressor + AcousticEchoCanceler (Option 1, Qualcomm Hexagon DSP,
-    zero CPU/latency; AGC left off) - PR #40.
+    - PR #39 (merged). Mic noise handling: hardware NS/AEC (Option 1, PR #40,
+    merged) sounded hollow/"pilot's mic" + delayed + didn't cancel game bleed, so
+    it was dropped in favor of a raw low-latency mic + a gentle software noise
+    gate (mutes idle hiss/quiet bleed, no artifacts) - PR #41 (supersedes #40).
 - Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
   A/V offset auto-calibrated (manual ~103ms preferred by the user).
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)

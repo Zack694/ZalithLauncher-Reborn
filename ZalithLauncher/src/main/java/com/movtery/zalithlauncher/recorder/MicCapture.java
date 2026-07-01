@@ -5,6 +5,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.media.AudioFormat;
+import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.util.Log;
@@ -90,21 +91,28 @@ final class MicCapture {
         int minBuf = AudioRecord.getMinBufferSize(sampleRate,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         if (minBuf <= 0) minBuf = 8192;
-        try {
-            // Small buffer (a few chunks) to keep capture latency low; the reader
-            // drains it continuously so it never overflows.
-            record = new AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate,
-                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
-                    Math.max(minBuf * 2, 8192));
-        } catch (Throwable t) {
-            Log.w(TAG, "AudioRecord create failed: " + t);
-            record = null;
-            return false;
+        int bufSize = Math.max(minBuf * 2, 8192);
+
+        // Try the rawest / most full-band source first so the voice doesn't sound
+        // narrowband/robotic ("pilot's mic") from the OEM telephony/comms mic path.
+        // UNPROCESSED (when the device supports it) = no OEM DSP at all;
+        // VOICE_RECOGNITION = clean, full-band, no AGC/NS; MIC = last resort.
+        for (int src : buildSourceCandidates()) {
+            try {
+                AudioRecord r = new AudioRecord(src, sampleRate,
+                        AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufSize);
+                if (r.getState() == AudioRecord.STATE_INITIALIZED) {
+                    record = r;
+                    Log.i(TAG, "Mic source = " + sourceName(src));
+                    break;
+                }
+                r.release();
+            } catch (Throwable t) {
+                Log.w(TAG, "AudioRecord source " + sourceName(src) + " failed: " + t);
+            }
         }
-        if (record.getState() != AudioRecord.STATE_INITIALIZED) {
-            Log.w(TAG, "AudioRecord not initialized");
-            try { record.release(); } catch (Throwable ignored) {}
-            record = null;
+        if (record == null) {
+            Log.w(TAG, "No usable mic AudioRecord source");
             return false;
         }
         ring = new short[Math.max(maxBacklog * 4, sampleRate / 2)];
@@ -130,6 +138,35 @@ final class MicCapture {
 
     void setActive(boolean a) {
         active = a;
+    }
+
+    /**
+     * Ordered list of mic sources to try, rawest/full-band first, to avoid the
+     * OEM "communication" mic path that produces the narrowband "pilot's mic"
+     * sound. UNPROCESSED is only offered when the device advertises support.
+     */
+    private int[] buildSourceCandidates() {
+        boolean unprocessed = false;
+        try {
+            AudioManager am = (AudioManager) appContext.getSystemService(Context.AUDIO_SERVICE);
+            unprocessed = am != null && "true".equals(
+                    am.getProperty(AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED));
+        } catch (Throwable ignored) {}
+        if (unprocessed) {
+            return new int[]{
+                    MediaRecorder.AudioSource.UNPROCESSED,
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    MediaRecorder.AudioSource.MIC};
+        }
+        return new int[]{
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.MIC};
+    }
+
+    private static String sourceName(int src) {
+        if (src == MediaRecorder.AudioSource.UNPROCESSED) return "UNPROCESSED";
+        if (src == MediaRecorder.AudioSource.VOICE_RECOGNITION) return "VOICE_RECOGNITION";
+        return "MIC";
     }
 
     private void readerLoop() {

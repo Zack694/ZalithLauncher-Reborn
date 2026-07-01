@@ -644,6 +644,10 @@ dropped the hardware NS/AEC that PR #40 added and instead:
     ~160ms hold, ~-36 dBFS threshold) mutes the mic below threshold - removing
     idle hiss and quiet game-speaker bleed between words with NO spectral
     artifacts (no more "pilot's mic").
+  - Full-band mic source: request UNPROCESSED (when the device supports it) or
+    VOICE_RECOGNITION instead of MIC, to avoid the OEM telephony/comms mic path
+    that itself produces the narrowband "pilot's mic" sound (added after the user
+    reported the pilot's-mic sound persisted).
 Honest limit: loud game bleed DURING speech still passes (the mic physically
 hears the speakers); headphones eliminate it completely, or a future
 reference-based AEC (using the game-audio tap as the far-end) could cancel it.

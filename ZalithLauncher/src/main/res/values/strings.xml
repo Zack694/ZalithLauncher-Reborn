@@ -165,6 +165,7 @@
     <string name="customctrl_passthru">Mouse Passthrough</string>
     <string name="customctrl_swipeable">Swipeable</string>
     <string name="customctrl_clicker">Clicker</string>
+    <string name="customctrl_voicechat">Voicechat (mic push-to-talk)</string>
     <string name="customctrl_clicker_min_cps">Min CPS</string>
     <string name="customctrl_clicker_max_cps">Max CPS</string>
     <string name="customctrl_forward_lock">Forward Lock</string>

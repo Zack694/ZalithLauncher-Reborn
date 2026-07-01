@@ -68,6 +68,18 @@ public final class GameRecorder {
         return INSTANCE;
     }
 
+    /**
+     * Push-to-talk mic state, driven by a control button flagged as "Voicechat
+     * (mic push-to-talk)". While held/toggled on, the audio pump mixes the mic
+     * into the recording. Static so the control button can set it without a
+     * reference to the (single) recorder instance.
+     */
+    private static volatile boolean sMicHeld = false;
+
+    public static void setMicHeld(boolean held) {
+        sMicHeld = held;
+    }
+
     // Display target, set by MinecraftGLSurface whenever the game window is (re)created.
     private Context appContext;
     private Surface displaySurface;
@@ -282,6 +294,9 @@ public final class GameRecorder {
         private Thread audioPump;
         private volatile boolean audioRunning = false;
         private short[] audioReadBuf;
+        // Push-to-talk microphone (mixed into the game-audio track when held).
+        private MicCapture micCapture;
+        private short[] micReadBuf;
 
         RenderThread(Context appContext, Surface displaySurface,
                      int gameWidth, int gameHeight, RecorderPrefs prefs) {
@@ -564,8 +579,25 @@ public final class GameRecorder {
                 long inFrames = 0;       // total input frames received
                 long outFrames = 0;      // total output frames produced
                 short[] outBuf = new short[outRate * ch / 4 + 64]; // up to ~250ms per tick
+                boolean micInitFailed = false; // set once if the mic can't be opened
 
                 while (audioRunning) {
+                    // Lazily open the mic the first time push-to-talk is pressed, so
+                    // the mic is never touched (no privacy indicator) unless a
+                    // voicechat button is actually used. It stays open for the rest
+                    // of the session, discarding audio while not held.
+                    if (sMicHeld && micCapture == null && !micInitFailed) {
+                        MicCapture mc = new MicCapture(appContext, outRate);
+                        if (mc.start()) {
+                            micCapture = mc;
+                        } else {
+                            micInitFailed = true;
+                        }
+                    }
+                    if (micCapture != null) {
+                        micCapture.setActive(sMicHeld);
+                    }
+
                     int n = OpenALAudioTap.read(audioReadBuf, audioReadBuf.length);
                     boolean producedAny = false;
                     if (n > 0) {
@@ -615,6 +647,7 @@ public final class GameRecorder {
                         if ((produced + 1) * ch > outBuf.length) break; // flush this batch
                     }
                     if (produced > 0) {
+                        mixMic(outBuf, produced, ch);
                         audioEncoder.feed(outBuf, produced * ch);
                         producedAny = true;
                     }
@@ -638,6 +671,33 @@ public final class GameRecorder {
                 }
             }, "RecordZy-AudioPump");
             audioPump.start();
+        }
+
+        /**
+         * Mix the push-to-talk mic (mono) into the interleaved output frames.
+         * Reads exactly as many mic samples as output frames (both real-time at
+         * the same rate); any shortfall is left as game-audio only. Samples are
+         * summed and clamped to 16-bit.
+         */
+        private void mixMic(short[] outBuf, int frames, int ch) {
+            MicCapture mic = micCapture;
+            if (mic == null || !sMicHeld) {
+                return;
+            }
+            if (micReadBuf == null || micReadBuf.length < frames) {
+                micReadBuf = new short[frames];
+            }
+            int got = mic.read(micReadBuf, frames);
+            for (int f = 0; f < got; f++) {
+                int m = micReadBuf[f];
+                for (int c = 0; c < ch; c++) {
+                    int idx = f * ch + c;
+                    int mixed = outBuf[idx] + m;
+                    if (mixed > 32767) mixed = 32767;
+                    else if (mixed < -32768) mixed = -32768;
+                    outBuf[idx] = (short) mixed;
+                }
+            }
         }
 
         private VideoEncoder createVideoEncoder(String mime, int w, int h, int bitrate, int fps)
@@ -910,6 +970,16 @@ public final class GameRecorder {
                 }
                 audioPump = null;
             }
+            // Mic is only touched by the pump thread (lazy init); the join above
+            // guarantees it's done before we release the AudioRecord here.
+            if (micCapture != null) {
+                try {
+                    micCapture.stop();
+                } catch (Exception ignored) {
+                }
+                micCapture = null;
+            }
+            sMicHeld = false; // clear so a held state can't leak into the next recording
             OpenALAudioTap.stop();
             if (audioEncoder != null) {
                 try {

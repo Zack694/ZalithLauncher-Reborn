@@ -367,13 +367,23 @@
             app:layout_constraintTop_toBottomOf="@id/checkboxSwipeable"
             tools:ignore="UseSwitchCompatOrMaterialXml" />
 
+        <!-- VOICECHAT (PUSH-TO-TALK MIC) SECTION -->
+        <Switch
+            android:id="@+id/checkboxVoicechat"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/_36sdp"
+            android:text="@string/customctrl_voicechat"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/checkboxClicker"
+            tools:ignore="UseSwitchCompatOrMaterialXml" />
+
         <TextView
             android:id="@+id/editMinCps_textView"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/customctrl_clicker_min_cps"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/checkboxClicker" />
+            app:layout_constraintTop_toBottomOf="@id/checkboxVoicechat" />
 
         <com.movtery.zalithlauncher.ui.view.AnimEditText
             android:id="@+id/editMinCps"

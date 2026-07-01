@@ -38,9 +38,6 @@ public class ControlData {
     public static final int SPECIALBTN_SCROLLUP = -7;
     public static final int SPECIALBTN_SCROLLDOWN = -8;
     public static final int SPECIALBTN_MENU = -9;
-    public static final int SPECIALBTN_RECORDING = -10;
-    public static final int SPECIALBTN_RECORDING_PAUSE = -11;
-    public static final int SPECIALBTN_VOICECHAT_MIC = -12;
 
     private static ControlData[] SPECIAL_BUTTONS;
     private static List<String> SPECIAL_BUTTON_NAME_ARRAY;
@@ -77,6 +74,9 @@ public class ControlData {
     public int clickerButton = SPECIALBTN_MOUSEPRI;
     public int minCps = 8;
     public int maxCps = 12;
+    /** When true, holding/toggling this button acts as push-to-talk: it records
+     *  the microphone into the built-in game recording while pressed. */
+    public boolean isVoicechatMic = false;
     private float width;         //Dp instead of Px now
     private float height;        //Dp instead of Px now
 
@@ -167,6 +167,7 @@ public class ControlData {
         this.clickerButton = controlData.clickerButton;
         this.minCps = controlData.minCps;
         this.maxCps = controlData.maxCps;
+        this.isVoicechatMic = controlData.isVoicechatMic;
     }
 
     public static ControlData[] getSpecialButtons(Context context) {
@@ -181,10 +182,7 @@ public class ControlData {
                     new ControlData(context.getString(R.string.keycode_special_mid), new int[]{SPECIALBTN_MOUSEMID}, "${margin}", "${margin}"),
                     new ControlData(context.getString(R.string.keycode_special_scrollup), new int[]{SPECIALBTN_SCROLLUP}, "${margin}", "${margin}"),
                     new ControlData(context.getString(R.string.keycode_special_scrolldown), new int[]{SPECIALBTN_SCROLLDOWN}, "${margin}", "${margin}"),
-                    new ControlData(context.getString(R.string.keycode_special_menu), new int[]{SPECIALBTN_MENU}, "${margin}", "${margin}"),
-                    new ControlData(context.getString(R.string.keycode_special_recording), new int[]{SPECIALBTN_RECORDING}, "${margin}", "${margin}"),
-                    new ControlData(context.getString(R.string.keycode_special_recording_pause), new int[]{SPECIALBTN_RECORDING_PAUSE}, "${margin}", "${margin}"),
-                    new ControlData(context.getString(R.string.keycode_special_voicechat_mic), new int[]{SPECIALBTN_VOICECHAT_MIC}, "${margin}", "${margin}")
+                    new ControlData(context.getString(R.string.keycode_special_menu), new int[]{SPECIALBTN_MENU}, "${margin}", "${margin}")
             };
         }
 

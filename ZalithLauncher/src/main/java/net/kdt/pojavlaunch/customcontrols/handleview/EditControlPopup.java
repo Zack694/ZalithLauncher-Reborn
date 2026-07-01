@@ -7,7 +7,10 @@ import static net.kdt.pojavlaunch.Tools.currentDisplayMetrics;
 
 import android.animation.ObjectAnimator;
 import android.annotation.SuppressLint;
+import android.Manifest;
+import android.app.Activity;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -24,6 +27,8 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 import androidx.constraintlayout.widget.ConstraintLayout;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 import com.kdt.DefocusableScrollView;
 import com.movtery.zalithlauncher.R;
@@ -76,7 +81,7 @@ public class EditControlPopup {
     };
     protected EditText mNameEditText, mWidthEditText, mHeightEditText, mMinCpsEditText, mMaxCpsEditText;
     @SuppressLint("UseSwitchCompatOrMaterialCode")
-    protected Switch mToggleSwitch, mPassthroughSwitch, mSwipeableSwitch, mForwardLockSwitch, mAbsoluteTrackingSwitch, mClickerSwitch;
+    protected Switch mToggleSwitch, mPassthroughSwitch, mSwipeableSwitch, mForwardLockSwitch, mAbsoluteTrackingSwitch, mClickerSwitch, mVoicechatSwitch;
     protected Spinner mOrientationSpinner;
     protected TextView[] mKeycodeTextviews = new TextView[6]; // CHANGED: 4 -> 6
     protected SeekBar mStrokeWidthSeekbar, mCornerRadiusSeekbar, mAlphaSeekbar;
@@ -294,6 +299,7 @@ public class EditControlPopup {
 
         mToggleSwitch.setChecked(data.isToggle);
         mClickerSwitch.setChecked(data.isClicker);
+        mVoicechatSwitch.setChecked(data.isVoicechatMic);
         mPassthroughSwitch.setChecked(data.passThruEnabled);
         mSwipeableSwitch.setChecked(data.isSwipeable);
         mMinCpsEditText.setText(String.valueOf(data.minCps));
@@ -399,6 +405,7 @@ public class EditControlPopup {
         mForwardLockSwitch = mScrollView.findViewById(R.id.checkboxForwardLock);
         mAbsoluteTrackingSwitch = mScrollView.findViewById(R.id.checkboxAbsoluteFingerTracking);
         mClickerSwitch = mScrollView.findViewById(R.id.checkboxClicker);
+        mVoicechatSwitch = mScrollView.findViewById(R.id.checkboxVoicechat);
         mMinCpsEditText = mScrollView.findViewById(R.id.editMinCps);
         mMaxCpsEditText = mScrollView.findViewById(R.id.editMaxCps);
 
@@ -507,6 +514,13 @@ public class EditControlPopup {
                 data.keycodes[0] = data.clickerButton;
             }
             updateClickerUiState();
+        });
+        mVoicechatSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (internalChanges) return;
+            mCurrentlyEditedButton.getProperties().isVoicechatMic = isChecked;
+            // Opt-in moment: ask for the mic permission when the user enables it,
+            // so push-to-talk can actually capture audio while recording.
+            if (isChecked) requestMicPermission();
         });
         mForwardLockSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (internalChanges) return;
@@ -706,6 +720,23 @@ public class EditControlPopup {
         } catch (NumberFormatException e) {
             Logging.e("EditControlPopup", e.toString());
             return fallback;
+        }
+    }
+
+    /** Ask for RECORD_AUDIO when the user enables push-to-talk, if not already granted. */
+    private void requestMicPermission() {
+        try {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                    == PackageManager.PERMISSION_GRANTED) {
+                return;
+            }
+            Context ctx = context;
+            if (ctx instanceof Activity) {
+                ActivityCompat.requestPermissions((Activity) ctx,
+                        new String[]{Manifest.permission.RECORD_AUDIO}, 4919);
+            }
+        } catch (Throwable t) {
+            Logging.e("EditControlPopup", "mic permission request failed: " + t);
         }
     }
 

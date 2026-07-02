@@ -644,6 +644,10 @@ dropped the hardware NS/AEC that PR #40 added and instead:
     ~160ms hold, ~-36 dBFS threshold) mutes the mic below threshold - removing
     idle hiss and quiet game-speaker bleed between words with NO spectral
     artifacts (no more "pilot's mic").
+  - Full-band mic source: request UNPROCESSED (when the device supports it) or
+    VOICE_RECOGNITION instead of MIC, to avoid the OEM telephony/comms mic path
+    that itself produces the narrowband "pilot's mic" sound (added after the user
+    reported the pilot's-mic sound persisted).
 Honest limit: loud game bleed DURING speech still passes (the mic physically
 hears the speakers); headphones eliminate it completely, or a future
 reference-based AEC (using the game-audio tap as the far-end) could cancel it.
@@ -653,6 +657,26 @@ MicCapture.java / conversation.txt).
 FILES:
 - recorder/MicCapture.java (EDITED - remove hardware NS/AEC; low-latency backlog cap; noise gate)
 - conversation.txt (EDITED - Turn 28)
+
+------------------------------------------------------------
+
+[Turn 29]
+User: Still sounds like a pilot's mic. -> (then) I merged PR #41 and used it,
+check it.
+
+Claude: Checked main after the merge and found the cause: PR #41 was merged at
+commit 053cfb1f, which was BEFORE the full-band mic-source commit (79c50e57) was
+pushed to the branch. So merged main still opened the mic with
+AudioSource.MIC - the OEM telephony/comms path that itself produces the
+narrowband "pilot's mic" sound - and the source fix never landed. Shipped that
+fix as its own new PR #42 (cherry-picked onto current main, since #41 is already
+merged/closed): MicCapture now tries UNPROCESSED (when the device advertises
+support) then VOICE_RECOGNITION then MIC, choosing the rawest full-band source,
+and logs which one it got ("Mic source = ...").
+
+FILES:
+- recorder/MicCapture.java (EDITED - full-band source selection: UNPROCESSED/VOICE_RECOGNITION/MIC)
+- conversation.txt (EDITED - Turn 29)
 
 ------------------------------------------------------------
 
@@ -699,7 +723,10 @@ KEY OUTCOMES / STATE
     - PR #39 (merged). Mic noise handling: hardware NS/AEC (Option 1, PR #40,
     merged) sounded hollow/"pilot's mic" + delayed + didn't cancel game bleed, so
     it was dropped in favor of a raw low-latency mic + a gentle software noise
-    gate (mutes idle hiss/quiet bleed, no artifacts) - PR #41 (supersedes #40).
+    gate (mutes idle hiss/quiet bleed, no artifacts) - PR #41. The "pilot's mic"
+    sound persisted because AudioSource.MIC used the OEM telephony/comms path, so
+    the mic now selects the rawest full-band source (UNPROCESSED /
+    VOICE_RECOGNITION / MIC) - PR #42.
 - Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
   A/V offset auto-calibrated (manual ~103ms preferred by the user).
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)

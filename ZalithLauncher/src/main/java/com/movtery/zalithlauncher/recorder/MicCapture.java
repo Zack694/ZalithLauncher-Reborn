@@ -5,7 +5,6 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.media.AudioFormat;
-import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.util.Log;
@@ -57,23 +56,31 @@ final class MicCapture {
     private short[] ring;
     private int head, tail, count;
 
-    // --- Noise gate state (reader thread only) ---
-    // Threshold in 16-bit amplitude. ~500/32768 ~= -36 dBFS: normal speech opens
-    // the gate easily; idle hiss / quiet bleed stays below it and is muted.
-    private static final float GATE_OPEN_AMP = 500f;
-    private static final float ENV_DECAY = 0.9997f; // envelope release per sample
-    private static final float ATTACK = 0.05f;      // gain rise (fast, ~ms)
-    private static final float RELEASE = 0.0006f;    // gain fall (slow, ~35ms)
-    private float gateEnv = 0f;   // running amplitude envelope
-    private float gateGain = 0f;  // smoothed 0..1 gain applied to samples
-    private int gateHold = 0;     // samples to keep the gate open after last peak
-    private final int gateHoldSamples;
+    // --- Makeup gain ---
+    // Full-band sources (VOICE_RECOGNITION / UNPROCESSED) have no AGC, so the raw
+    // voice is much quieter than the old MIC source. Boost it so it's audible in
+    // the mix and the gate can track it. Clamped to avoid clipping.
+    private static final float MAKEUP_GAIN = 3.0f;
+
+    // --- Adaptive, FAIL-OPEN noise gate state (reader thread only) ---
+    // The gate is RELATIVE to your own recent voice level, not a fixed threshold,
+    // so it works no matter how quiet/loud the source is. It starts fully OPEN
+    // and only attenuates once it has seen clear speech AND the current level has
+    // dropped far below it - so it can never silence an active voice.
+    private static final float ENV_DECAY = 0.9997f;     // fast envelope release/sample
+    private static final float REF_DECAY = 0.999985f;   // voice-reference release (~secs)
+    private static final float OPEN_RATIO = 0.10f;      // open when within ~20dB of ref
+    private static final float MIN_REF = 900f;          // below this ref => fail-open
+    private static final float ATTACK = 0.05f;          // gain rise (fast, ~ms)
+    private static final float RELEASE = 0.0008f;       // gain fall (slow, ~25ms)
+    private float gateEnv = 0f;    // fast amplitude envelope
+    private float voiceRef = 0f;   // slow tracker of recent voice/peak level
+    private float gateGain = 1f;   // smoothed 0..1 gain; starts OPEN (fail-open)
 
     MicCapture(Context context, int sampleRate) {
         this.appContext = context.getApplicationContext();
         this.sampleRate = sampleRate > 0 ? sampleRate : 48000;
         this.maxBacklog = Math.max(512, this.sampleRate / 8);   // ~125ms
-        this.gateHoldSamples = this.sampleRate / 6;             // ~160ms hold
     }
 
     boolean hasPermission() {
@@ -93,10 +100,9 @@ final class MicCapture {
         if (minBuf <= 0) minBuf = 8192;
         int bufSize = Math.max(minBuf * 2, 8192);
 
-        // Try the rawest / most full-band source first so the voice doesn't sound
-        // narrowband/robotic ("pilot's mic") from the OEM telephony/comms mic path.
-        // UNPROCESSED (when the device supports it) = no OEM DSP at all;
-        // VOICE_RECOGNITION = clean, full-band, no AGC/NS; MIC = last resort.
+        // Use a full-band source so the voice isn't narrowband/robotic ("pilot's
+        // mic") from the OEM telephony/comms mic path: VOICE_RECOGNITION first
+        // (clean, full-band, with usable level), MIC as fallback.
         for (int src : buildSourceCandidates()) {
             try {
                 AudioRecord r = new AudioRecord(src, sampleRate,
@@ -118,8 +124,8 @@ final class MicCapture {
         ring = new short[Math.max(maxBacklog * 4, sampleRate / 2)];
         head = tail = count = 0;
         gateEnv = 0f;
-        gateGain = 0f;
-        gateHold = 0;
+        voiceRef = 0f;
+        gateGain = 1f; // start open
         running = true;
         try {
             record.startRecording();
@@ -141,32 +147,21 @@ final class MicCapture {
     }
 
     /**
-     * Ordered list of mic sources to try, rawest/full-band first, to avoid the
-     * OEM "communication" mic path that produces the narrowband "pilot's mic"
-     * sound. UNPROCESSED is only offered when the device advertises support.
+     * Ordered list of mic sources to try. VOICE_RECOGNITION is full-band (avoids
+     * the narrowband "pilot's mic" telephony path) AND keeps a usable input level,
+     * unlike UNPROCESSED which on some devices returns a near-silent, un-gained
+     * signal (that made the voice inaudible). MIC is the fallback.
      */
     private int[] buildSourceCandidates() {
-        boolean unprocessed = false;
-        try {
-            AudioManager am = (AudioManager) appContext.getSystemService(Context.AUDIO_SERVICE);
-            unprocessed = am != null && "true".equals(
-                    am.getProperty(AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED));
-        } catch (Throwable ignored) {}
-        if (unprocessed) {
-            return new int[]{
-                    MediaRecorder.AudioSource.UNPROCESSED,
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    MediaRecorder.AudioSource.MIC};
-        }
         return new int[]{
                 MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 MediaRecorder.AudioSource.MIC};
     }
 
     private static String sourceName(int src) {
-        if (src == MediaRecorder.AudioSource.UNPROCESSED) return "UNPROCESSED";
         if (src == MediaRecorder.AudioSource.VOICE_RECOGNITION) return "VOICE_RECOGNITION";
-        return "MIC";
+        if (src == MediaRecorder.AudioSource.MIC) return "MIC";
+        return "SRC_" + src;
     }
 
     private void readerLoop() {
@@ -194,8 +189,8 @@ final class MicCapture {
                     head = tail = count = 0;
                 }
                 gateEnv = 0f;
-                gateGain = 0f;
-                gateHold = 0;
+                voiceRef = 0f;
+                gateGain = 1f; // reset open so the next press never starts muted
                 continue;
             }
             applyGate(buf, n);
@@ -220,21 +215,34 @@ final class MicCapture {
         }
     }
 
-    /** In-place noise gate: mute samples while the envelope is below threshold. */
+    /**
+     * Apply makeup gain + an adaptive, fail-open noise gate, in place.
+     *
+     * The gate is relative to your own recent voice level ({@code voiceRef}), so
+     * it opens for speech regardless of the source's absolute gain. It fails OPEN:
+     * until a clear voice reference is established it passes everything, and it
+     * only attenuates when the level drops well below your recent speech - so an
+     * active voice is never muted.
+     */
     private void applyGate(short[] buf, int n) {
         for (int i = 0; i < n; i++) {
-            float a = Math.abs(buf[i]);
-            // Peak-hold envelope with slow decay.
-            gateEnv = a > gateEnv ? a : gateEnv * ENV_DECAY;
-            if (gateEnv > GATE_OPEN_AMP) {
-                gateHold = gateHoldSamples;
-            } else if (gateHold > 0) {
-                gateHold--;
-            }
-            float target = gateHold > 0 ? 1f : 0f;
+            // Makeup gain first (compensate for the un-AGC'd full-band source),
+            // clamped to 16-bit.
+            int s = (int) (buf[i] * MAKEUP_GAIN);
+            if (s > 32767) s = 32767;
+            else if (s < -32768) s = -32768;
+
+            float a = Math.abs(s);
+            gateEnv = a > gateEnv ? a : gateEnv * ENV_DECAY;          // fast envelope
+            voiceRef = gateEnv > voiceRef ? gateEnv : voiceRef * REF_DECAY; // slow ref
+
+            // Fail-open until we've seen real speech; then gate relative to it.
+            boolean open = voiceRef < MIN_REF || gateEnv > voiceRef * OPEN_RATIO;
+            float target = open ? 1f : 0f;
             float coef = target > gateGain ? ATTACK : RELEASE;
             gateGain += (target - gateGain) * coef;
-            buf[i] = (short) (buf[i] * gateGain);
+
+            buf[i] = (short) (s * gateGain);
         }
     }
 

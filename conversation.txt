@@ -680,6 +680,30 @@ FILES:
 
 ------------------------------------------------------------
 
+[Turn 30]
+User: After merging PR #42 I can only hear the game sounds - not even my voice,
+even when I'm talking.
+
+Claude: Regression from the interaction between the two prior fixes: the
+full-band source from #42 (especially UNPROCESSED) delivers a much quieter,
+un-gained signal than the old MIC (which had AGC), so the fixed-threshold noise
+gate from #41 (open at ~-36 dBFS) never opened -> the mic was muted entirely,
+leaving only game audio. Fix (PR #43):
+  - Makeup gain (~3x, clamped) so the raw full-band voice is audible in the mix.
+  - Adaptive, FAIL-OPEN noise gate: relative to your own recent voice level
+    (voiceRef) instead of a fixed threshold, so it opens for speech at any input
+    gain; it starts open and only attenuates once clear speech has been seen AND
+    the level drops well below it - so an active voice can never be muted.
+  - Dropped the UNPROCESSED source (near-silent/un-gained on some devices);
+    prefer VOICE_RECOGNITION (full-band, avoids "pilot's mic", usable level)
+    then MIC.
+
+FILES:
+- recorder/MicCapture.java (EDITED - makeup gain, adaptive fail-open gate, drop UNPROCESSED source)
+- conversation.txt (EDITED - Turn 30)
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -725,8 +749,10 @@ KEY OUTCOMES / STATE
     it was dropped in favor of a raw low-latency mic + a gentle software noise
     gate (mutes idle hiss/quiet bleed, no artifacts) - PR #41. The "pilot's mic"
     sound persisted because AudioSource.MIC used the OEM telephony/comms path, so
-    the mic now selects the rawest full-band source (UNPROCESSED /
-    VOICE_RECOGNITION / MIC) - PR #42.
+    the mic now selects a full-band source (UNPROCESSED / VOICE_RECOGNITION /
+    MIC) - PR #42. That made the raw voice too quiet for the fixed-threshold
+    gate (voice went silent), so PR #43 adds makeup gain + an adaptive fail-open
+    gate and prefers VOICE_RECOGNITION over UNPROCESSED.
 - Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
   A/V offset auto-calibrated (manual ~103ms preferred by the user).
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)

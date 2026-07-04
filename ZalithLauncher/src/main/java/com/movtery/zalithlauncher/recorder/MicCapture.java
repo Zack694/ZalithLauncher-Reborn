@@ -11,6 +11,8 @@ import android.util.Log;
 
 import androidx.core.content.ContextCompat;
 
+import com.movtery.zalithlauncher.recorder.audio.RnnoiseDenoiser;
+
 /**
  * Captures the microphone (mono, 16-bit PCM) on a background thread into a small
  * ring buffer, for push-to-talk mixing into the game recording.
@@ -55,6 +57,13 @@ final class MicCapture {
     private final Object lock = new Object();
     private short[] ring;
     private int head, tail, count;
+
+    // RNNoise neural denoiser (48 kHz only). Removes background noise while
+    // keeping speech. The mic is framed into fixed rnFrame-size (480) blocks
+    // before denoising. Null => denoising disabled (unsupported ABI / not 48k).
+    private RnnoiseDenoiser denoiser;
+    private short[] rnFrame;   // 480-sample accumulator (reader thread only)
+    private int rnFill;
 
     // --- Makeup gain ---
     // Full-band sources (VOICE_RECOGNITION / UNPROCESSED) have no AGC, so the raw
@@ -126,6 +135,26 @@ final class MicCapture {
         gateEnv = 0f;
         voiceRef = 0f;
         gateGain = 1f; // start open
+
+        // RNNoise operates at 48 kHz only. Enable it when the source is 48 kHz
+        // and the native lib is present; otherwise fall back to gain+gate alone.
+        denoiser = null;
+        rnFill = 0;
+        if (sampleRate == 48000 && RnnoiseDenoiser.isAvailable()) {
+            RnnoiseDenoiser d = new RnnoiseDenoiser();
+            int fs = RnnoiseDenoiser.frameSize();
+            if (fs > 0 && d.create()) {
+                denoiser = d;
+                rnFrame = new short[fs];
+                Log.i(TAG, "RNNoise denoiser ACTIVE (frame=" + fs + ")");
+            } else {
+                d.destroy();
+            }
+        }
+        if (denoiser == null) {
+            Log.i(TAG, "RNNoise denoiser inactive (available="
+                    + RnnoiseDenoiser.isAvailable() + ", sampleRate=" + sampleRate + ")");
+        }
         running = true;
         try {
             record.startRecording();
@@ -191,26 +220,50 @@ final class MicCapture {
                 gateEnv = 0f;
                 voiceRef = 0f;
                 gateGain = 1f; // reset open so the next press never starts muted
+                rnFill = 0;
                 continue;
             }
-            applyGate(buf, n);
-            synchronized (lock) {
-                for (int i = 0; i < n; i++) {
-                    if (count == ring.length) {
-                        head = (head + 1) % ring.length; // full: drop oldest
-                        count--;
+            if (denoiser != null) {
+                // Frame the mic into fixed 480-sample blocks: RNNoise denoise
+                // (on the raw signal) -> makeup gain + adaptive gate -> enqueue.
+                int fs = rnFrame.length;
+                int off = 0;
+                while (off < n) {
+                    int take = Math.min(fs - rnFill, n - off);
+                    System.arraycopy(buf, off, rnFrame, rnFill, take);
+                    rnFill += take;
+                    off += take;
+                    if (rnFill == fs) {
+                        denoiser.process(rnFrame);
+                        applyGate(rnFrame, fs);
+                        enqueue(rnFrame, fs);
+                        rnFill = 0;
                     }
-                    ring[tail] = buf[i];
-                    tail = (tail + 1) % ring.length;
-                    count++;
                 }
-                // Keep latency bounded: if the consumer fell behind, drop the
-                // oldest samples so the mic never lags the game audio.
-                if (count > maxBacklog) {
-                    int drop = count - maxBacklog;
-                    head = (head + drop) % ring.length;
-                    count -= drop;
+            } else {
+                applyGate(buf, n);
+                enqueue(buf, n);
+            }
+        }
+    }
+
+    /** Append mono samples to the ring, dropping oldest to keep latency bounded. */
+    private void enqueue(short[] src, int len) {
+        synchronized (lock) {
+            for (int i = 0; i < len; i++) {
+                if (count == ring.length) {
+                    head = (head + 1) % ring.length; // full: drop oldest
+                    count--;
                 }
+                ring[tail] = src[i];
+                tail = (tail + 1) % ring.length;
+                count++;
+            }
+            // If the consumer fell behind, drop the oldest so the mic never lags.
+            if (count > maxBacklog) {
+                int drop = count - maxBacklog;
+                head = (head + drop) % ring.length;
+                count -= drop;
             }
         }
     }
@@ -269,6 +322,11 @@ final class MicCapture {
                 Thread.currentThread().interrupt();
             }
             readerThread = null;
+        }
+        // Reader thread has exited (join above), so it's safe to free the denoiser.
+        if (denoiser != null) {
+            try { denoiser.destroy(); } catch (Throwable ignored) {}
+            denoiser = null;
         }
         if (record != null) {
             try { record.stop(); } catch (Throwable ignored) {}

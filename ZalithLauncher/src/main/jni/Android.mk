@@ -86,6 +86,25 @@ LOCAL_CPPFLAGS += -std=c++17
 include $(BUILD_SHARED_LIBRARY)
 
 
+# RecordZy voice DSP: Xiph RNNoise (BSD) denoiser for the push-to-talk mic.
+# Removes background noise (fans/keyboard/hiss/ambient) while keeping speech and
+# reports a voice-activity probability. Self-contained C, builds for every ABI.
+include $(CLEAR_VARS)
+LOCAL_MODULE := recordzydsp
+LOCAL_LDLIBS := -llog -lm
+LOCAL_C_INCLUDES := $(HERE_PATH)/recordzydsp/rnnoise
+LOCAL_SRC_FILES := \
+    recordzydsp/dsp_jni.c \
+    recordzydsp/rnnoise/celt_lpc.c \
+    recordzydsp/rnnoise/denoise.c \
+    recordzydsp/rnnoise/kiss_fft.c \
+    recordzydsp/rnnoise/pitch.c \
+    recordzydsp/rnnoise/rnn.c \
+    recordzydsp/rnnoise/rnn_data.c
+LOCAL_CFLAGS += -O2
+include $(BUILD_SHARED_LIBRARY)
+
+
 include $(CLEAR_VARS)
 LOCAL_MODULE := pojavexec_awt
 LOCAL_SRC_FILES := \

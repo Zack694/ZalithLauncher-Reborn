@@ -736,6 +736,35 @@ FILES:
 
 ------------------------------------------------------------
 
+[Turn 32]
+User: (After merging PR #44 / RNNoise) It still records the game sounds a bit,
+and the voice is a bit laggy - sometimes a micro pop or delayed, maybe bitrate?
+
+Claude: Separated the two symptoms. (1) "Still records game sounds" is expected:
+RNNoise only removes UNcorrelated background noise; it cannot cancel game audio
+bleeding from the speaker into the mic (that correlated echo is the job of the
+planned WebRTC AEC3 PR, using the OpenAL tap as the far-end reference - or use
+headphones). (2) The pops/lag are NOT bitrate (audio is 128 kbps AAC-LC). Real
+causes were in the mic->mix handoff: when the audio pump asked for N mic samples
+but the ring momentarily had fewer (got < frames), the mic contribution
+hard-stopped mid-waveform -> a step discontinuity -> an audible click; RNNoise's
+bursty 480-sample delivery made these under-runs more frequent. And the mic ring
+tolerated up to ~125 ms of backlog, so the voice could land late. Fix (PR #45):
+  - De-click the mix: fade the mic IN over ~2 ms (96 frames) when it resumes
+    after a short block, and fade it OUT over the last ~2 ms when a block
+    under-runs, so the mic never starts/stops with a step (steady state stays a
+    flat gain of 1.0). Kills the micro pops.
+  - Trim latency: lower the mic backlog cap from ~125 ms (sampleRate/8) to ~85 ms
+    (sampleRate/12) so the push-to-talk voice sits closer to real time; the new
+    de-click fade masks the rare extra under-run so it stays click-free.
+
+FILES:
+- recorder/GameRecorder.java (EDITED - mixMic de-click fade in/out on under-run)
+- recorder/MicCapture.java (EDITED - tighter mic backlog cap ~85 ms for latency)
+- conversation.txt (EDITED - Turn 32)
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -784,7 +813,11 @@ KEY OUTCOMES / STATE
     the mic now selects a full-band source (UNPROCESSED / VOICE_RECOGNITION /
     MIC) - PR #42. That made the raw voice too quiet for the fixed-threshold
     gate (voice went silent), so PR #43 adds makeup gain + an adaptive fail-open
-    gate and prefers VOICE_RECOGNITION over UNPROCESSED.
+    gate and prefers VOICE_RECOGNITION over UNPROCESSED. PR #44 (merged) adds the
+    RNNoise neural denoiser (librecordzydsp) to remove background noise. PR #45
+    de-clicks the mic->game mix (fade in/out on ring under-run) and tightens the
+    mic backlog cap (~125 ms -> ~85 ms) to fix micro pops + latency. Game-speaker
+    bleed cancellation (WebRTC AEC3, far-end = OpenAL tap) is still a planned PR.
 - Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
   A/V offset auto-calibrated (manual ~103ms preferred by the user).
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)

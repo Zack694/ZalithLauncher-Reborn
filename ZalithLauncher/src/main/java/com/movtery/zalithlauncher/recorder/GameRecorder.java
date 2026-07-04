@@ -297,6 +297,11 @@ public final class GameRecorder {
         // Push-to-talk microphone (mixed into the game-audio track when held).
         private MicCapture micCapture;
         private short[] micReadBuf;
+        // De-click state: length (in frames) of the mic fade in/out at block
+        // boundaries (~2 ms @ 48 kHz), and whether the previous mixed block ran
+        // short (so the next one fades the mic back in instead of stepping).
+        private static final int MIC_FADE_FRAMES = 96;
+        private boolean micWasShort = true;
 
         RenderThread(Context appContext, Surface displaySurface,
                      int gameWidth, int gameHeight, RecorderPrefs prefs) {
@@ -682,14 +687,37 @@ public final class GameRecorder {
         private void mixMic(short[] outBuf, int frames, int ch) {
             MicCapture mic = micCapture;
             if (mic == null || !sMicHeld) {
+                // Next press should fade the mic back in from silence, not step.
+                micWasShort = true;
                 return;
             }
             if (micReadBuf == null || micReadBuf.length < frames) {
                 micReadBuf = new short[frames];
             }
             int got = mic.read(micReadBuf, frames);
+            if (got <= 0) {
+                micWasShort = true;
+                return;
+            }
+            // The mic ring can momentarily hand back fewer samples than the pump
+            // asked for (got < frames). Summing raw samples and then stopping mid
+            // -waveform leaves a step discontinuity -> an audible click/pop. So we
+            // fade the mic IN over the first few samples when it resumes after a
+            // short block, and fade it OUT over the last few samples when this
+            // block under-runs. In steady state (got == frames) the gain is a flat
+            // 1.0 and nothing changes.
+            final int fade = Math.min(MIC_FADE_FRAMES, got);
+            final boolean shortNow = got < frames;
             for (int f = 0; f < got; f++) {
-                int m = micReadBuf[f];
+                float g = 1f;
+                if (micWasShort && f < fade) {
+                    g = (f + 1) / (float) fade;                 // fade in
+                }
+                if (shortNow && f >= got - fade) {
+                    float out = (got - f) / (float) fade;       // fade out
+                    if (out < g) g = out;
+                }
+                int m = (int) (micReadBuf[f] * g);
                 for (int c = 0; c < ch; c++) {
                     int idx = f * ch + c;
                     int mixed = outBuf[idx] + m;
@@ -698,6 +726,7 @@ public final class GameRecorder {
                     outBuf[idx] = (short) mixed;
                 }
             }
+            micWasShort = shortNow;
         }
 
         private VideoEncoder createVideoEncoder(String mime, int w, int h, int bitrate, int fps)

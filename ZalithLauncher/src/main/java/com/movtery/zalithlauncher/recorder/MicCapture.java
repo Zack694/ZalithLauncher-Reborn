@@ -45,7 +45,9 @@ final class MicCapture {
     private final Context appContext;
     private final int sampleRate;
 
-    // Max mic latency we tolerate before dropping the oldest samples (~120ms).
+    // Max mic latency we tolerate before dropping the oldest samples (~85ms).
+    // Kept tight so the push-to-talk voice sits close to real time; the mixer's
+    // de-click fade masks the rare under-run this can cause, so it won't pop.
     private final int maxBacklog;
 
     private AudioRecord record;
@@ -89,7 +91,7 @@ final class MicCapture {
     MicCapture(Context context, int sampleRate) {
         this.appContext = context.getApplicationContext();
         this.sampleRate = sampleRate > 0 ? sampleRate : 48000;
-        this.maxBacklog = Math.max(512, this.sampleRate / 8);   // ~125ms
+        this.maxBacklog = Math.max(512, this.sampleRate / 12);  // ~85ms
     }
 
     boolean hasPermission() {

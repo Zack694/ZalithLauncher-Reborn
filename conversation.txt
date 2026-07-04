@@ -44,6 +44,10 @@ Native OpenAL tap:
   - openal-tap/build.sh                 (builds OpenAL-soft 1.23.1 with the tap)
   - jni/recordzytap/recordzy_audiotap.cpp (resolves tap symbols via /proc/self/maps)
   - jni/Android.mk
+Native voice DSP (recordzydsp):
+  - recorder/audio/RnnoiseDenoiser.java (Java wrapper for the RNNoise denoiser)
+  - jni/recordzydsp/dsp_jni.c           (JNI bridge to RNNoise)
+  - jni/recordzydsp/rnnoise/*           (vendored Xiph RNNoise v0.1.1, BSD)
 Launcher integration (pojav/):
   - pojav/MainActivity.java
   - pojav/MinecraftGLSurface.java       (on-demand bridge-window hand-off)
@@ -701,6 +705,34 @@ leaving only game audio. Fix (PR #43):
 FILES:
 - recorder/MicCapture.java (EDITED - makeup gain, adaptive fail-open gate, drop UNPROCESSED source)
 - conversation.txt (EDITED - Turn 30)
+
+------------------------------------------------------------
+
+[Turn 31]
+User: Can we make it detect my voice and not record background noises / game
+sounds - like Krisp (Discord), a self-learning thing? Tell me how you can/can't,
+then: do the thing you recommend (WebRTC AEC3 + RNNoise).
+
+Claude: Clarified that Krisp is a pre-trained DNN (not per-user self-learning)
+and a commercial SDK that can't be freely embedded; true "learn my voice"
+(target-speaker extraction) is research-grade/heavy. Recommended two free
+on-device pieces: (1) RNNoise (neural background-noise removal) and (2) WebRTC
+AEC3 using our OpenAL game-audio tap as the far-end reference (the correct way
+to cancel game-speaker bleed, which a denoiser can't). Implementing in two PRs.
+This PR (#44) adds RNNoise: vendored Xiph RNNoise v0.1.1 (BSD, bundled model) as
+a new native module (librecordzydsp) with a JNI bridge + Java wrapper; MicCapture
+frames the mic into 480-sample (10 ms @ 48 kHz) blocks, runs RNNoise on the raw
+signal, then makeup gain + the adaptive gate, then enqueues. Guarded to 48 kHz;
+graceful fallback (gain+gate only) if the lib/ABI/rate is unavailable. WebRTC
+AEC3 for game-bleed cancellation is the planned follow-up PR.
+
+FILES:
+- jni/recordzydsp/rnnoise/* (NEW - vendored Xiph RNNoise v0.1.1, BSD)
+- jni/recordzydsp/dsp_jni.c (NEW - JNI bridge)
+- recorder/audio/RnnoiseDenoiser.java (NEW - Java wrapper)
+- jni/Android.mk (EDITED - add recordzydsp module)
+- recorder/MicCapture.java (EDITED - 480-frame RNNoise denoise before gain/gate)
+- conversation.txt (EDITED - Turn 31)
 
 ------------------------------------------------------------
 

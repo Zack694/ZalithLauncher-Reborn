@@ -172,6 +172,31 @@
                 android:layout_height="wrap_content"
                 android:max="500"/>
 
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/_8sdp"
+                android:orientation="horizontal">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Voice volume (mic)"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+                <TextView
+                    android:id="@+id/recorder_voice_volume_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/black_or_white"
+                    tools:ignore="HardcodedText"/>
+            </LinearLayout>
+            <SeekBar
+                android:id="@+id/recorder_voice_volume"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="400"/>
+
             <View
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/_1sdp"

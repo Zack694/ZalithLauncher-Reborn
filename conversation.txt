@@ -765,6 +765,41 @@ FILES:
 
 ------------------------------------------------------------
 
+[Turn 33]
+User: (After PR #45) It's a bit muffled, cutting and lagging. And can you add a
+"Voice volume" slider below the Audio delay one so I can slide it up to make the
+mic louder than the game audio? (saves the value)
+
+Claude: Diagnosed the "cutting": PR #45's de-click fade was firing on EVERY mix
+block, not rarely. The audio pump drains the mic in bursts, and the mic ring had
+no cushion (it ran chronically near-empty), so read() kept returning fewer
+samples than the pump asked for (got < frames) -> the fade ramped the mic down
+and back up on every block -> constant amplitude modulation = "cutting"/muffled.
+Fix (PR #46):
+  - MicCapture is now a small JITTER BUFFER: it buffers a ~50 ms cushion before
+    it starts serving and refuses to serve again until the cushion is rebuilt
+    after any dry-out. That keeps every mixed block full (got == frames) so the
+    de-click fade stays inert (flat gain 1.0) in steady state - no more cutting.
+  - Restored a sane backlog cap (~150 ms hard limit) instead of the too-tight
+    85 ms from #45, which had made buffer drops (another cutting source) likely.
+  - Added a "Voice volume (mic)" SeekBar in the Special Menu right below "Audio
+    delay", 0-400 % (100 % = unity, same weight as the game; higher = louder than
+    the game). Value is saved via RecorderPrefs (KEY_MIC_VOLUME_PCT) and applied
+    as a gain on the mic in GameRecorder.mixMic, read once at record start.
+Note: if any muffling remains after cutting is gone, it'd be RNNoise's spectral
+suppression - can be softened in a follow-up (dry/wet blend). Speaker->mic game
+bleed is still the separate WebRTC AEC3 job (or headphones).
+
+FILES:
+- recorder/MicCapture.java (EDITED - jitter buffer: ~50ms prime cushion, ~150ms cap)
+- recorder/GameRecorder.java (EDITED - apply mic Voice-volume gain in mixMic)
+- recorder/RecorderPrefs.java (EDITED - get/setMicVolumePercent, KEY_MIC_VOLUME_PCT)
+- pojav/GameMenuSettingsController.java (EDITED - Voice volume slider init + save)
+- res/layout/view_game_menu.xml (EDITED - Voice volume SeekBar below Audio delay)
+- conversation.txt (EDITED - Turn 33)
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).
@@ -815,9 +850,11 @@ KEY OUTCOMES / STATE
     gate (voice went silent), so PR #43 adds makeup gain + an adaptive fail-open
     gate and prefers VOICE_RECOGNITION over UNPROCESSED. PR #44 (merged) adds the
     RNNoise neural denoiser (librecordzydsp) to remove background noise. PR #45
-    de-clicks the mic->game mix (fade in/out on ring under-run) and tightens the
-    mic backlog cap (~125 ms -> ~85 ms) to fix micro pops + latency. Game-speaker
-    bleed cancellation (WebRTC AEC3, far-end = OpenAL tap) is still a planned PR.
+    de-clicks the mic->game mix (fade in/out on ring under-run). PR #46 makes the
+    mic a ~50 ms jitter buffer (fixes "cutting" from the fade firing every block)
+    and adds a saved "Voice volume (mic)" slider (0-400 %) below Audio delay to
+    boost the mic over the game. Game-speaker bleed cancellation (WebRTC AEC3,
+    far-end = OpenAL tap) is still a planned PR.
 - Audio status: CONFIRMED working by the user (clean, in-sync, no glitches);
   A/V offset auto-calibrated (manual ~103ms preferred by the user).
 - Encoder: Android MediaCodec - AAC-LC audio (48kHz stereo), HEVC (AVC fallback)

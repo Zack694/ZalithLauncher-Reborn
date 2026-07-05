@@ -800,6 +800,35 @@ FILES:
 
 ------------------------------------------------------------
 
+[Turn 34]
+User: (After PR #46) Almost perfect. Just optimize the recording + voice
+recording - when voicechat is enabled and I'm talking it lags / drops ~5-10 fps.
+
+Claude: Two CPU hot-spots cause the talk-time fps dip:
+  (1) RNNoise runs on the mic reader thread only while PTT is held, competing
+      with the game's render/GL threads for CPU.
+  (2) The audio pump BUSY-SPINS: when the tap has data but it isn't wall-clock
+      time to emit yet, the loop kept hammering the tap with no sleep, pegging a
+      core for the whole recording - leaving no thermal/CPU headroom for (1).
+Fix (PR #47):
+  - Lower the mic/RNNoise reader thread nice value (THREAD_PRIORITY_DEFAULT + 6)
+    so it yields to the game under contention. Kept on the foreground cpuset (NOT
+    full THREAD_PRIORITY_BACKGROUND) so it's never throttled onto starved little
+    cores; the ~50 ms jitter buffer from #46 absorbs the extra scheduling
+    latency, so no glitches.
+  - Stop the pump busy-spin: if a pass emits no output, sleep 1 ms (or 3 ms when
+    the tap had nothing) instead of spinning. Output is still paced to the wall
+    clock, so A/V timing is unchanged; this just frees a pegged core (and the
+    heat that was throttling game fps). The tap over-delivers ~2x real time and
+    each read grabs tens of ms, so the nap can't starve it.
+
+FILES:
+- recorder/MicCapture.java (EDITED - reader thread yields to game render threads)
+- recorder/GameRecorder.java (EDITED - audio pump no longer busy-spins)
+- conversation.txt (EDITED - Turn 34)
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).

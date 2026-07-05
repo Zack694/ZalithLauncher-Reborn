@@ -204,6 +204,18 @@ final class MicCapture {
     }
 
     private void readerLoop() {
+        // Run the mic capture + RNNoise denoise below the game's render/GL
+        // threads so it yields CPU under contention - this is what removes the
+        // ~5-10 fps dip while push-to-talk is held. We only lower the nice value
+        // (stay on the normal/foreground cpuset), NOT full THREAD_PRIORITY_
+        // BACKGROUND, so the thread is never throttled onto starved little cores;
+        // the ~50 ms jitter buffer absorbs the small extra scheduling latency, so
+        // audio stays glitch-free.
+        try {
+            android.os.Process.setThreadPriority(
+                    android.os.Process.THREAD_PRIORITY_DEFAULT + 6);
+        } catch (Throwable ignored) {
+        }
         short[] buf = new short[1024];
         while (running) {
             int n;

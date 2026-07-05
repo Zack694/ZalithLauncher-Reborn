@@ -669,9 +669,17 @@ public final class GameRecorder {
                         pos -= drop;
                     }
 
-                    if (n <= 0 && !producedAny) {
+                    // Don't busy-spin. If nothing was emitted this pass, yield the
+                    // core briefly instead of hammering the tap in a tight loop.
+                    // Output is still paced to the wall clock (desiredOut), so this
+                    // only removes wasted CPU - and the heat that was throttling
+                    // game fps - without changing A/V timing. When we DID produce,
+                    // we loop immediately so we never fall behind. The tap
+                    // over-delivers (~2x real time) and each read grabs tens of ms,
+                    // so a 1 ms nap can't starve it.
+                    if (!producedAny) {
                         try {
-                            Thread.sleep(3);
+                            Thread.sleep(n > 0 ? 1 : 3);
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             break;

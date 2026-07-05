@@ -104,6 +104,18 @@ public final class RecorderPrefs {
         prefs.edit().putInt(KEY_AUDIO_DELAY_MS, Math.max(0, Math.min(500, v))).apply();
     }
 
+    private static final String KEY_MIC_VOLUME_PCT = "mic_volume_pct";
+
+    /** Push-to-talk mic volume, as a percentage of unity. 100 = same weight as
+     *  the game audio; higher makes the voice louder than the game. Range 0-400. */
+    public int getMicVolumePercent() {
+        return Math.max(0, Math.min(400, prefs.getInt(KEY_MIC_VOLUME_PCT, 100)));
+    }
+
+    public void setMicVolumePercent(int v) {
+        prefs.edit().putInt(KEY_MIC_VOLUME_PCT, Math.max(0, Math.min(400, v))).apply();
+    }
+
     /** FFmpeg-free: returns the MediaCodec mime type. */
     public String getMimeType() {
         String codec = prefs.getString(KEY_CODEC, "hevc");

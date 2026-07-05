@@ -130,6 +130,11 @@ public class GameMenuSettingsController implements
                 : p.getAudioDelayMs() + " ms");
         binding.recorderAvsync.setOnSeekBarChangeListener(this);
 
+        int voiceVol = p.getMicVolumePercent();
+        binding.recorderVoiceVolume.setProgress(voiceVol);
+        binding.recorderVoiceVolumeValue.setText(voiceVol + "%");
+        binding.recorderVoiceVolume.setOnSeekBarChangeListener(this);
+
         updateRecorderToggleText();
     }
 
@@ -458,6 +463,11 @@ public class GameMenuSettingsController implements
                 new RecorderPrefs(activity).setAudioDelayMs(progress);
             }
             binding.recorderAvsyncValue.setText(progress == 0 ? "Auto" : progress + " ms");
+        } else if (seekBar == binding.recorderVoiceVolume) {
+            if (saveValue) {
+                new RecorderPrefs(activity).setMicVolumePercent(progress);
+            }
+            binding.recorderVoiceVolumeValue.setText(progress + "%");
         }
     }
 

@@ -45,10 +45,16 @@ final class MicCapture {
     private final Context appContext;
     private final int sampleRate;
 
-    // Max mic latency we tolerate before dropping the oldest samples (~85ms).
-    // Kept tight so the push-to-talk voice sits close to real time; the mixer's
-    // de-click fade masks the rare under-run this can cause, so it won't pop.
+    // Max mic latency we tolerate before dropping the oldest samples (~150ms).
     private final int maxBacklog;
+
+    // Jitter-buffer cushion (~50ms). The audio pump drains the mic in bursts, so
+    // we buffer this much before we start serving and refuse to serve until we
+    // have it again after a dry-out. This keeps every mixed block full (got ==
+    // frames) so the mixer never has to fade on an under-run - which is what made
+    // the voice "cut"/warble when the ring ran chronically near-empty.
+    private final int primeTarget;
+    private boolean primed = false;
 
     private AudioRecord record;
     private Thread readerThread;
@@ -91,7 +97,8 @@ final class MicCapture {
     MicCapture(Context context, int sampleRate) {
         this.appContext = context.getApplicationContext();
         this.sampleRate = sampleRate > 0 ? sampleRate : 48000;
-        this.maxBacklog = Math.max(512, this.sampleRate / 12);  // ~85ms
+        this.maxBacklog = Math.max(1024, this.sampleRate * 150 / 1000);  // ~150ms hard cap
+        this.primeTarget = Math.max(512, this.sampleRate * 50 / 1000);    // ~50ms cushion
     }
 
     boolean hasPermission() {
@@ -134,6 +141,7 @@ final class MicCapture {
         }
         ring = new short[Math.max(maxBacklog * 4, sampleRate / 2)];
         head = tail = count = 0;
+        primed = false;
         gateEnv = 0f;
         voiceRef = 0f;
         gateGain = 1f; // start open
@@ -218,6 +226,7 @@ final class MicCapture {
                 // gate so the next press starts from fresh, live, closed-gate audio.
                 synchronized (lock) {
                     head = tail = count = 0;
+                    primed = false; // re-buffer the cushion on the next press
                 }
                 gateEnv = 0f;
                 voiceRef = 0f;
@@ -301,15 +310,28 @@ final class MicCapture {
         }
     }
 
-    /** Drain up to {@code max} mono samples into {@code out}; returns count read. */
+    /**
+     * Drain up to {@code max} mono samples into {@code out}; returns count read.
+     *
+     * <p>Acts as a small jitter buffer: it stays silent (returns 0) until it has
+     * built up {@link #primeTarget} samples of cushion, then serves normally. If
+     * it ever runs completely dry it re-buffers the cushion before serving again.
+     * This keeps the bursty audio pump supplied with full blocks so the mixer
+     * doesn't have to fade on under-runs (which caused the voice to "cut").</p>
+     */
     int read(short[] out, int max) {
         synchronized (lock) {
+            if (!primed) {
+                if (count < primeTarget) return 0; // still filling the cushion
+                primed = true;
+            }
             int n = Math.min(max, Math.min(count, out.length));
             for (int i = 0; i < n; i++) {
                 out[i] = ring[head];
                 head = (head + 1) % ring.length;
             }
             count -= n;
+            if (count == 0) primed = false; // ran dry: rebuild cushion next time
             return n;
         }
     }

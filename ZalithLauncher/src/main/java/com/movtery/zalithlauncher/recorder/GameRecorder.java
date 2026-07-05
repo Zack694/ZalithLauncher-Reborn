@@ -297,6 +297,9 @@ public final class GameRecorder {
         // Push-to-talk microphone (mixed into the game-audio track when held).
         private MicCapture micCapture;
         private short[] micReadBuf;
+        // User-set mic loudness relative to the game audio (1.0 = unity). Read
+        // once at record start from RecorderPrefs (Voice volume slider).
+        private volatile float micVolume = 1f;
         // De-click state: length (in frames) of the mic fade in/out at block
         // boundaries (~2 ms @ 48 kHz), and whether the previous mixed block ran
         // short (so the next one fades the mic back in instead of stepping).
@@ -454,6 +457,7 @@ public final class GameRecorder {
             encWidth = targetW;
             encHeight = targetH;
             int bitrate = prefs.getBitrateKbps() * 1000;
+            micVolume = prefs.getMicVolumePercent() / 100f; // Voice volume slider
             int fps = prefs.getFps();
             frameIntervalNanos = 1_000_000_000L / Math.max(1, fps);
             lastRelayNanos = 0;
@@ -717,7 +721,7 @@ public final class GameRecorder {
                     float out = (got - f) / (float) fade;       // fade out
                     if (out < g) g = out;
                 }
-                int m = (int) (micReadBuf[f] * g);
+                int m = (int) (micReadBuf[f] * g * micVolume);
                 for (int c = 0; c < ch; c++) {
                     int idx = f * ch + c;
                     int mixed = outBuf[idx] + m;

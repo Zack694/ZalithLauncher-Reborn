@@ -834,6 +834,16 @@ public final class GameRecorder {
                 ready = relayReadyIdx;
                 inUse = relayInUseIdx;
             }
+            // If the encoder thread still hasn't consumed the last relay frame,
+            // don't render a new one: it would just overwrite an unencoded frame,
+            // burning a full-res GPU blit right when the GPU is already the
+            // bottleneck (which is what drops game fps). We deliberately do NOT
+            // advance lastRelayNanos here, so the next game frame retries and we
+            // emit a FRESH frame the instant the encoder catches up - no stale
+            // recorded frames, just no wasted work while it's behind.
+            if (ready >= 0) {
+                return;
+            }
             int w = freeRelayIndex(ready, inUse);
 
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, relayFbo);

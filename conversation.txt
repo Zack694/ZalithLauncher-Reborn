@@ -829,6 +829,37 @@ FILES:
 
 ------------------------------------------------------------
 
+[Turn 35]
+User: Did you optimize the screen recording too? If not, optimize it more. Also:
+if I bind a button to "6 + Special right-click + 7" it doesn't switch to 6 and
+right-click, it just switches to 7 - launcher bug or game bug? Fix if launcher
+(I'll confirm first).
+
+Claude: Answered honestly that #44-47 were all audio-side; the video path was
+already heavily optimized (decoupled display present, off-thread encoder GL, 3x
+relay buffers + GPU fences, fps-paced capture, low-latency/no-B-frame encoder).
+Found one real video win and shipped it (PR #48): in drawFrame(), when the
+encoder thread hasn't consumed the previous relay frame yet (relayReadyIdx >= 0),
+SKIP rendering a new relay frame instead of overwriting an unencoded one - that
+was burning a full-res GPU blit exactly when the GPU is the bottleneck (the fps-
+drop case). lastRelayNanos is NOT advanced on skip, so the next game frame emits
+a FRESH frame the instant the encoder catches up (no stale recorded frames, just
+no wasted GPU work while behind). Identical behaviour when not under load.
+
+On the button: explained it is a LAUNCHER limitation, NOT a game bug. sendKey
+Presses() dispatches all bound keycodes simultaneously (press-together / release-
+together) - correct for modifier combos (Shift+W) but not sequential macros.
+Minecraft gets 6 and 7 in the same tick so the hotbar ends on 7, and the right-
+click lands after the slot is already 7. Fixing = adding an opt-in sequential/
+macro mode (ordered dispatch with small inter-key delays); left UNIMPLEMENTED
+pending the user's confirmation (they asked to confirm first).
+
+FILES:
+- recorder/GameRecorder.java (EDITED - drawFrame skips stale/unconsumed relay frame)
+- conversation.txt (EDITED - Turn 35)
+
+------------------------------------------------------------
+
 KEY OUTCOMES / STATE
 ====================
 - Mod-RecordZy: functional Fabric 1.21.11 screen recorder (FFmpeg HEVC -> MP4).

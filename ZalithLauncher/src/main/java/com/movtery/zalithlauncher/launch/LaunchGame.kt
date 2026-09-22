@@ -13,6 +13,7 @@ import com.movtery.zalithlauncher.feature.accounts.AccountUtils
 import com.movtery.zalithlauncher.feature.accounts.AccountsManager
 import com.movtery.zalithlauncher.feature.log.Logging
 import com.movtery.zalithlauncher.feature.version.Version
+import com.movtery.zalithlauncher.modsync.ModSyncBridge
 import com.movtery.zalithlauncher.plugins.PluginLoader
 import com.movtery.zalithlauncher.renderer.Renderers
 import com.movtery.zalithlauncher.setting.AllSettings
@@ -177,6 +178,20 @@ object LaunchGame {
         }
 
         try {
+            // ModInj bridge: open the injection window FIRST, before plugin/
+            // renderer/mod checks run, so injected files are in place when the
+            // launcher scans mods and before the JVM starts. Fail-open: never
+            // blocks launching when ModInj is absent.
+            runCatching {
+                ModSyncBridge.onGameStarting(
+                    activity,
+                    minecraftVersion.getGameDir(),
+                    minecraftVersion.getVersionName()
+                )
+            }.onFailure { e ->
+                Logging.e("ModSyncBridge", "Game-starting hook failed", e)
+            }
+
             PluginLoader.refreshAllPlugins(activity)
             Renderers.reloadRenderers(activity, minecraftVersion.getRenderer(), false)
             ensureRendererIsValid(activity, minecraftVersion)
@@ -232,6 +247,14 @@ object LaunchGame {
 
             JREUtils.redirectAndPrintJRELog()
             launchJvm(activity, account, minecraftVersion, javaRuntime, customArgs)
+            // ModInj bridge: JVM returned -> clean exit; tell ModInj to wipe the
+            // selected files. Crash exits never reach this line; ModInj instead
+            // detects the :game process death via GameLivenessService binding.
+            runCatching {
+                ModSyncBridge.onGameEnded(activity, minecraftVersion.getVersionName())
+            }.onFailure { e ->
+                Logging.e("ModSyncBridge", "Game-ended hook failed", e)
+            }
             GameService.setActive(false)
         } catch (t: Throwable) {
             isLaunching.set(false)

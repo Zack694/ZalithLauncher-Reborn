@@ -26,30 +26,50 @@ import android.util.Log
  *    the process that hosts the game UI + JVM). When that binding dies the
  *    game process is gone: clean exit, hard crash, or force close — ALL paths;
  *  - receives mid-game FILE_CHANGED broadcasts and copies updated files into
- *    the backup store;
+ *    the backup store AND overwrites the vault copy (same stored name), so the
+ *    next launch injects the latest version;
  *  - ends the session on GAME_ENDED / binding death — the provider then wipes
  *    exactly the injected files.
  *
  * LIFENESS BINDING — why BIND_AUTO_CREATE:
- * the binding used to be flags=0 ("never auto-create"). But a non-AUTO_CREATE
- * binding only ever attaches to an ALREADY-CREATED service, and nothing in the
- * launcher creates GameLivenessService on its own — so with the current
- * launcher build the binding would sit dormant forever and the crash/force-
- * close detection would be dead code. AUTO_CREATE makes the system create the
- * service (and the :game process, which the launcher needs moments later for
- * the game anyway) and guarantees onBindingDied when that process dies.
- * endSession() unbinds, releasing the create-ref, so ModInj never keeps an
- * empty :game process alive after the game is done.
+ * a non-AUTO_CREATE binding only ever attaches to an ALREADY-CREATED service,
+ * and nothing in the launcher creates GameLivenessService on its own. With
+ * AUTO_CREATE the system creates the service (and the :game process, which the
+ * launcher needs moments later for the game anyway) and guarantees
+ * onBindingDied when that process dies. endSession() unbinds, releasing the
+ * create-ref, so ModInj never keeps an empty :game process alive afterwards.
+ *
+ * DESTRUCTIVE ACTIONS NEED POSITIVE EVIDENCE (this invariant fixes a real bug
+ * — do not "simplify" it away):
+ * a mid-game process death used to cascade into a false wipe. The backup of a
+ * changed file ran on the MAIN thread (binder + file I/O), an ANR killed the
+ * ModInj process, its liveness binding dropped and GameLivenessService was
+ * destroyed (ModInj held the only ref) — while the game itself kept running.
+ * The sticky restart then probed passively, never connected, and wiped the
+ * session of a LIVE game ("Game ended" while still playing). Therefore:
+ *  - mid-game copies now run on a worker thread (no broadcast ANR);
+ *  - a passive probe's silence only counts as game-death AFTER a probe bind
+ *    was actually handed to the system (bridge discovered);
+ *  - the "never connected" wipe only fires when a bind was actually requested;
+ *  - an unreachable bridge NEVER triggers a wipe (fail-safe, retry instead);
+ *  - duplicate service starts never re-resolve or rebind a healthy session.
  *
  * STALE SESSIONS — adopt or wipe, never guess wrong in the destructive way:
  * if the service starts and the provider still holds a session, the game is
  * either still running (ModInj was killed mid-game) or long dead (reboot,
- * force-stop). A passive (flags=0) probe binding connects only if the liveness
- * service still exists (= game alive) — connect => adopt the session; no
- * connect within the probe window => wipe. One override: if ModInj itself died
- * while a session was live and the device did NOT reboot meanwhile, adopt
- * directly (the probe cannot reconnect because the create-ref died with the
- * old process). Reboots are detected via SystemClock.elapsedRealtime().
+ * force-stop). A passive (flags=0) probe connects only if the liveness
+ * service still exists (= game alive) — connect => adopt; no connect within
+ * the probe window => wipe. One override: if ModInj itself died while a
+ * session was live and the device did NOT reboot meanwhile, adopt directly
+ * (rebind with AUTO_CREATE recreates the destroyed liveness service).
+ * Reboots are detected via SystemClock.elapsedRealtime().
+ *
+ * BRIDGE KEEP-WARM: the change watchers that power mid-game backups live in
+ * the launcher's :launcher process. Under game memory pressure Android can
+ * kill that background process — backups would silently stop. While watching,
+ * the watchdog re-pings whenever the bridge authority is lost: the ping wakes
+ * :launcher, whose provider restores the persisted session and re-arms its
+ * watchers, so FILE_CHANGED events (and backups) resume on their own.
  */
 class ModWatchService : Service() {
     companion object {
@@ -62,7 +82,7 @@ class ModWatchService : Service() {
 
         private const val WATCHDOG_INTERVAL_MS = 5_000L
         private const val LOST_GRACE_MS = 15_000L        // connected once, then lost
-        private const val BIND_FAIL_GRACE_MS = 60_000L   // never connected, bind keeps failing
+        private const val BIND_FAIL_GRACE_MS = 60_000L   // requested bind never connected
         private const val STALE_PROBE_MS = 10_000L       // passive probe window for stale sessions
 
         var isRunning = false
@@ -129,9 +149,13 @@ class ModWatchService : Service() {
     // Stale-session probe state (Mode.RESOLVING)
     private var staleInstance: String? = null
     private var staleSince = 0L
+    private var probeBindRequested = false // probe bind actually handed to the system
 
     private var receiversRegistered = false
     private var watchInstance: String? = null
+
+    /** All file copies (backups + vault updates) happen OFF the main thread. */
+    private val backupExecutor = ThreadPool.single
 
     private val watchdog = Handler(Looper.getMainLooper())
     private val watchdogTick = object : Runnable {
@@ -156,9 +180,30 @@ class ModWatchService : Service() {
     private val fileChangedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val relPath = intent.getStringExtra(ModSyncClient.EXTRA_REL_PATH) ?: return
+            // NEVER copy files here — this is the main thread and a slow copy
+            // (big file, busy storage) ANRs the broadcast, Android kills the
+            // process, and the session of a LIVE game used to be wiped after
+            // the restart. Hand off to the worker and return immediately.
+            backupExecutor.execute { handleFileChanged(applicationContext, relPath) }
+        }
+    }
+
+    /**
+     * Mid-game file change: copy the new content into the backup store AND
+     * overwrite the vault blob (same stored name) so the next launch injects
+     * the latest version. Runs on [backupExecutor].
+     */
+    private fun handleFileChanged(context: Context, relPath: String) {
+        try {
             val instance = currentSessionInstance() ?: watchInstance ?: return
             val backup = Vault.backupFromLauncher(context, instance, relPath)
-            Log.i(TAG, "Mid-game change backed up: $relPath -> ${backup != null}")
+            val vaulted = Vault.updateVaultFromLauncher(context, instance, relPath)
+            Log.i(TAG, "Mid-game change: $relPath (backup=${backup != null}, vaultUpdated=$vaulted)")
+            if (backup != null || vaulted) {
+                notifyBackedUp(relPath.substringAfterLast('/'))
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Mid-game backup failed for '$relPath': ${t.message}")
         }
     }
 
@@ -221,23 +266,38 @@ class ModWatchService : Service() {
             // fresh session. Bind AUTO_CREATE and watch it live or die.
             val instance = currentSessionInstance() ?: ""
             if (instance.isNotEmpty()) {
+                if (mode == Mode.WATCHING && watchInstance == instance) {
+                    // Already watching this exact session (duplicate start).
+                    // Re-binding would drop a healthy liveness connection for
+                    // nothing — and could even destroy+recreate the liveness
+                    // service mid-game. Just refresh the bookkeeping.
+                    WatchState.mark(this, instance)
+                    notifyGameState(instance, ended = false)
+                    Log.i(TAG, "Duplicate BIND_LIVENESS for live session '$instance' — ignored")
+                    return START_STICKY
+                }
                 watchInstance = instance
                 WatchState.mark(this, instance)
                 mode = Mode.WATCHING
                 firstBindAt = SystemClock.elapsedRealtime()
                 everConnected = false
                 connected = false
+                staleInstance = null
+                probeBindRequested = false
                 bindLiveness(autoCreate = true)
                 notifyGameState(instance, ended = false)
                 Log.i(TAG, "Session adopted at game start: '$instance'")
             } else {
                 Log.w(TAG, "BIND_LIVENESS without a provider session — resolving as stale")
-                startStaleResolve()
+                startStaleResolve(null)
             }
-        } else {
-            // Boot autostart, app-open autostart or a STICKY restart: figure
-            // out whether a game session exists and what to do with it.
+        } else if (mode == Mode.IDLE) {
+            // Boot autostart, app-open autostart or a STICKY restart — but
+            // ONLY when nothing is in flight: re-resolving while WATCHING or
+            // RESOLVING could tear down a healthy session or wipe a live game.
             resolveSessionOnStart()
+        } else {
+            Log.i(TAG, "Start while $mode — ignored (session already in flight)")
         }
 
         return START_STICKY
@@ -245,12 +305,20 @@ class ModWatchService : Service() {
 
     /**
      * Entry-point reconciliation: adopt a live session, probe an ambiguous
-     * one, or go idle. Never wipes blindly — see the class doc.
+     * one, or go idle. NEVER wipes without positive evidence — an unreachable
+     * bridge proves nothing about the game and always resolves to idle.
      */
     private fun resolveSessionOnStart() {
+        if (!ensureBridge()) {
+            // The bridge is unreachable: we know nothing about a possible
+            // session and could not wipe through the provider anyway.
+            mode = Mode.IDLE
+            Log.i(TAG, "Launcher bridge unreachable — idle (no session guesses, no wipes)")
+            return
+        }
         val providerSession = currentSessionInstance()
         if (providerSession == null) {
-            // No session at the provider: nothing to watch, nothing to wipe.
+            // Bridge reachable and it really has no session: nothing to watch.
             WatchState.clear(this)
             mode = Mode.IDLE
             watchInstance = null
@@ -261,7 +329,9 @@ class ModWatchService : Service() {
         val marker = WatchState.snapshot(this)
         if (marker != null && marker.instance == providerSession && !WatchState.rebootedSince(this, marker)) {
             // ModInj died while this exact session was live and the device did
-            // not reboot since: the game is very likely still running. Adopt.
+            // not reboot since: the game is very likely still running. Adopt —
+            // the AUTO_CREATE rebind recreates the liveness service that died
+            // together with the old ModInj process.
             Log.w(TAG, "Recovered mid-game (session='$providerSession') — resuming watch")
             watchInstance = providerSession
             mode = Mode.WATCHING
@@ -276,20 +346,36 @@ class ModWatchService : Service() {
         }
     }
 
-    private fun startStaleResolve(instance: String? = null) {
-        val target = instance ?: currentSessionInstance()
-        if (target == null) {
+    private fun startStaleResolve(instance: String?) {
+        val target = instance ?: currentSessionInstance() ?: run {
             WatchState.clear(this)
             mode = Mode.IDLE
             return
         }
         staleInstance = target
         staleSince = SystemClock.elapsedRealtime()
+        probeBindRequested = false
         mode = Mode.RESOLVING
         everConnected = false
         connected = false
-        bindLiveness(autoCreate = false) // passive probe: only connects if the service exists
+        requestProbeBind()
         Log.i(TAG, "Probing stale session '$target' for ${STALE_PROBE_MS / 1000}s")
+    }
+
+    /**
+     * Arms the passive probe binding. Returns false when the bind never
+     * reached the system (bridge undiscovered) — the probe's silence then
+     * means NOTHING about the game's state and must never be wiped on.
+     */
+    private fun requestProbeBind(): Boolean {
+        if (probeBindRequested) return true
+        if (!ensureBridge()) return false
+        probeBindRequested = bindLiveness(autoCreate = false)
+        if (probeBindRequested) {
+            // The probe window only starts once the probe is actually out.
+            staleSince = SystemClock.elapsedRealtime()
+        }
+        return probeBindRequested
     }
 
     private fun registerReceivers() {
@@ -318,13 +404,18 @@ class ModWatchService : Service() {
         receiversRegistered = true
     }
 
-    private fun bindLiveness(autoCreate: Boolean) {
+    /**
+     * Requests the liveness binding. Returns true when the bind was actually
+     * handed to the system (only then may its silence be treated as evidence),
+     * false when it was skipped (bridge undiscovered) or rejected.
+     */
+    private fun bindLiveness(autoCreate: Boolean): Boolean {
         unbindLiveness()
         val pkg = ModSyncClient.launcherPackage ?: run {
             // Discover the bridge lazily (fresh process may never have pinged).
             if (!ModSyncClient.ping(this)) {
                 Log.w(TAG, "Liveness bind skipped: launcher bridge not found")
-                return
+                return false
             }
             ModSyncClient.launcherPackage!!
         }
@@ -338,6 +429,7 @@ class ModWatchService : Service() {
         if (bindRegistered) {
             Log.i(TAG, "Liveness bind requested (autoCreate=$autoCreate)")
         }
+        return bindRegistered
     }
 
     private fun unbindLiveness() {
@@ -351,6 +443,9 @@ class ModWatchService : Service() {
     private fun stepWatchdog() {
         if (mode == Mode.WATCHING) {
             WatchState.touch(this) // keeps the reboot marker fresh
+            // Bridge keep-warm (see class doc): wake a killed :launcher process
+            // so its change watchers come back and mid-game backups resume.
+            if (ModSyncClient.authority == null) runCatching { ModSyncClient.ping(this) }
             if (connected) return
             val now = SystemClock.elapsedRealtime()
             if (everConnected) {
@@ -364,11 +459,12 @@ class ModWatchService : Service() {
                     endSession(this, watchInstance ?: "")
                 }
             } else {
-                // Never connected (game process still booting, or the bridge
-                // is gone). Keep retrying the create-ref bind; wipe only if
-                // it stays down for the full grace.
+                // Never connected (game process still booting). Retry the
+                // create-ref bind; wipe only if a bind WAS requested and then
+                // stayed silent for the full grace — that proves the game
+                // process never came up. A skipped bind proves nothing.
                 if (!bindRegistered) bindLiveness(autoCreate = true)
-                if (now - firstBindAt > BIND_FAIL_GRACE_MS) {
+                if (bindRegistered && now - firstBindAt > BIND_FAIL_GRACE_MS) {
                     Log.e(TAG, "Liveness never connected for >${BIND_FAIL_GRACE_MS / 1000}s — wiping orphaned session")
                     endSession(this, watchInstance ?: "")
                 }
@@ -381,17 +477,23 @@ class ModWatchService : Service() {
                 watchInstance = target
                 WatchState.mark(this, target)
                 staleInstance = null
+                probeBindRequested = false
                 mode = Mode.WATCHING
                 firstBindAt = SystemClock.elapsedRealtime()
                 bindLiveness(autoCreate = true) // upgrade to a create-ref binding
                 notifyGameState(target, ended = false)
-            } else if (SystemClock.elapsedRealtime() - staleSince > STALE_PROBE_MS) {
-                Log.e(TAG, "Stale probe found no live game — wiping session '$target'")
-                unbindLiveness()
-                staleInstance = null
-                mode = Mode.IDLE
-                endSession(this, target)
+            } else if (requestProbeBind()) {
+                if (SystemClock.elapsedRealtime() - staleSince > STALE_PROBE_MS) {
+                    Log.e(TAG, "Stale probe found no live game — wiping session '$target'")
+                    unbindLiveness()
+                    staleInstance = null
+                    probeBindRequested = false
+                    mode = Mode.IDLE
+                    endSession(this, target)
+                }
             }
+            // else: the probe could not even be requested (bridge unreachable)
+            // — keep retrying on the next tick; NEVER wipe without a real probe.
         }
         // Mode.IDLE: nothing to do; new sessions arrive via onStartCommand.
     }
@@ -421,6 +523,8 @@ class ModWatchService : Service() {
         WatchState.clear(context)
         unbindLiveness()
         everConnected = false
+        staleInstance = null
+        probeBindRequested = false
         mode = Mode.IDLE
         watchInstance = null
         if (instance.isNotEmpty()) notifyGameState(instance, ended = true)
@@ -428,7 +532,9 @@ class ModWatchService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Keep-alive: the user swiped ModInj from recents while a game session
-        // is live. Best-effort re-kick; START_STICKY covers the rest.
+        // is live. Best-effort re-kick; START_STICKY covers the rest. The null
+        // action is safe now: while WATCHING/RESOLVING the start is ignored,
+        // while IDLE it just re-resolves.
         super.onTaskRemoved(rootIntent)
         if (WatchState.snapshot(this) != null) {
             try {
@@ -472,6 +578,15 @@ class ModWatchService : Service() {
         val text = if (ended) getString(R.string.notif_game_ended, instance)
         else getString(R.string.notif_watching_instance, instance)
         nm.notify(NOTIFICATION_ID, buildNotification(text))
+    }
+
+    /**
+     * Positive feedback after a mid-game change was captured: proves to the
+     * user that vault + backup actually updated while they were still playing.
+     */
+    private fun notifyBackedUp(fileName: String) {
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIFICATION_ID, buildNotification(getString(R.string.notif_backed_up, fileName)))
     }
 
     private fun createChannel(context: Context) {

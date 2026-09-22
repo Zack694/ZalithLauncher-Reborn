@@ -163,26 +163,72 @@ object Vault {
 
     /**
      * Copies a launcher-side file into the backup store. Returns the stored
-     * backup file, or null when the source could not be read.
+     * backup file, or null when the source could not be read. The copy is
+     * atomic (temp + rename) so a killed process can never leave a truncated
+     * backup behind.
      */
     fun backupFromLauncher(context: Context, instance: String, relPath: String): File? {
         val stored = digestName(instance, relPath)
         val target = File(backupRoot(context), stored)
-        target.delete()
-        var copied = false
-        target.outputStream().use { out ->
-            copied = ModSyncClient.readInto(context, relPath, out) > 0
-        }
-        if (!copied) {
-            target.delete()
-            return null
-        }
+        if (!atomicCopyFromLauncher(context, relPath, target)) return null
         val entries = loadBackupIndex(context).filterNot {
             it.instance == instance && it.relPath == relPath
         }.toMutableList()
         entries.add(BackupEntry(instance, relPath, stored))
         saveBackupIndex(context, entries)
         return target
+    }
+
+    /**
+     * Overwrites the VAULT copy of an already-vaulted file with its current
+     * launcher-side content. Mid-game changes (config edits, option saves…)
+     * therefore flow straight back into the injection set: the next launch
+     * injects the latest version, under the same name. The stored blob name is
+     * derived from instance + relPath (not from the content), so the vault
+     * index does not change — only the file bytes do.
+     *
+     * Returns false when the file is not in the vault or the read failed.
+     */
+    fun updateVaultFromLauncher(context: Context, instance: String, relPath: String): Boolean {
+        val entry = entryFor(context, instance, relPath) ?: return false
+        val target = File(vaultDir(context), entry.stored)
+        return atomicCopyFromLauncher(context, relPath, target)
+    }
+
+    /**
+     * Streams the launcher-side [relPath] into [target] atomically: the data
+     * lands in a temp file first and is renamed over the target only after a
+     * complete read. A read failure (or a process kill mid-copy) can never
+     * destroy the previous vault blob or backup — the temp file is discarded
+     * instead. Zero-byte files are valid content; only a failed read (-1)
+     * counts as an error.
+     */
+    @Synchronized
+    private fun atomicCopyFromLauncher(context: Context, relPath: String, target: File): Boolean {
+        target.parentFile?.mkdirs()
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        var copied = -1L
+        try {
+            tmp.outputStream().use { out ->
+                copied = ModSyncClient.readInto(context, relPath, out)
+            }
+        } catch (_: Exception) {
+            copied = -1L
+        }
+        if (copied < 0) {
+            tmp.delete()
+            return false
+        }
+        if (!tmp.renameTo(target)) {
+            // POSIX rename replaces silently; reaching here means the target
+            // could not be replaced directly — fall back to delete + rename.
+            target.delete()
+            if (!tmp.renameTo(target)) {
+                tmp.delete()
+                return false
+            }
+        }
+        return true
     }
 
     fun backupEntryFor(context: Context, instance: String, relPath: String): BackupEntry? =

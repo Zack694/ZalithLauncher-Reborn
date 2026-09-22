@@ -1,5 +1,6 @@
 package com.zack694.modinj
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -54,6 +55,31 @@ import android.util.Log
  *  - an unreachable bridge NEVER triggers a wipe (fail-safe, retry instead);
  *  - duplicate service starts never re-resolve or rebind a healthy session.
  *
+ * POSITIVE EVIDENCE BEATS TIMEOUTS (v1.5.0 — fixes "Game ended" while the
+ * game is still LAUNCHING; do not regress this):
+ * binding silence is NOT death evidence during the launch window. Two
+ * real-world sequences used to wipe a session whose game was still booting:
+ *  1) ModInj's own process gets killed by the extreme memory pressure of a
+ *     MC launch BEFORE it marked the session; the sticky restart finds the
+ *     provider session but no local marker, probes passively — and the probe
+ *     can NEVER connect because the only thing that creates the liveness
+ *     service is ModInj's own AUTO_CREATE binding, which died with the old
+ *     ModInj process. 10s later it wiped the files of a game that was still
+ *     booting. The same wipe fired when the user merely OPENED the ModInj
+ *     app mid-launch (app-open autostart -> resolve path).
+ *  2) grace timeouts (60s bind-fail / 15s lost-binding) treated silence as
+ *     death even though MC launches take minutes on phones.
+ * The fix: the launcher bridge now answers CALL_GAME_STATE with the real
+ * liveness of its `:game` process (see [gameLooksAlive]). EVERY destructive
+ * decision asks it first — dead => wipe with confidence, alive => keep
+ * waiting however long the launch takes, unknown => never wipe.
+ *
+ * SESSION IDENTITY GUARD (v1.5.0): the provider holds exactly one global
+ * session. A signal from an OLD session (late GAME_ENDED after a quick
+ * relaunch, binding death racing a fresh injection) must never destroy a
+ * NEWER session's files — [endSession] therefore wipes only when the
+ * provider's current session still matches the one being ended.
+ *
  * STALE SESSIONS — adopt or wipe, never guess wrong in the destructive way:
  * if the service starts and the provider still holds a session, the game is
  * either still running (ModInj was killed mid-game) or long dead (reboot,
@@ -82,7 +108,6 @@ class ModWatchService : Service() {
 
         private const val WATCHDOG_INTERVAL_MS = 5_000L
         private const val LOST_GRACE_MS = 15_000L        // connected once, then lost
-        private const val BIND_FAIL_GRACE_MS = 60_000L   // requested bind never connected
         private const val STALE_PROBE_MS = 10_000L       // passive probe window for stale sessions
 
         var isRunning = false
@@ -143,7 +168,6 @@ class ModWatchService : Service() {
     private var bindRegistered = false     // bindService() succeeded; unbind required
     private var connected = false          // onServiceConnected has fired
     private var everConnected = false      // connected at least once for this session
-    private var firstBindAt = 0L           // first bind attempt of the current session
     private var disconnectedAt = 0L        // when the binding was last observed lost
 
     // Stale-session probe state (Mode.RESOLVING)
@@ -279,7 +303,6 @@ class ModWatchService : Service() {
                 watchInstance = instance
                 WatchState.mark(this, instance)
                 mode = Mode.WATCHING
-                firstBindAt = SystemClock.elapsedRealtime()
                 everConnected = false
                 connected = false
                 staleInstance = null
@@ -335,13 +358,14 @@ class ModWatchService : Service() {
             Log.w(TAG, "Recovered mid-game (session='$providerSession') — resuming watch")
             watchInstance = providerSession
             mode = Mode.WATCHING
-            firstBindAt = SystemClock.elapsedRealtime()
             everConnected = false
             connected = false
             bindLiveness(autoCreate = true)
             notifyGameState(providerSession, ended = false)
         } else {
-            // Ambiguous: probe passively, adopt on connect, wipe on timeout.
+            // Ambiguous: probe passively and ask the launcher for the real
+            // game state — adopt when it is alive, wipe only on positive
+            // evidence that it is gone (never on probe silence alone).
             startStaleResolve(providerSession)
         }
     }
@@ -440,6 +464,32 @@ class ModWatchService : Service() {
         connected = false
     }
 
+    /**
+     * POSITIVE EVIDENCE of the game's liveness, straight from the launcher.
+     *
+     * The launcher reports whether its `:game` process is running right now
+     * and at what oom importance. While a session launches or plays, the game
+     * activity plus GameService (an FGS living inside `:game` for the whole
+     * session) keep the process at foreground/FGS importance; once the
+     * session is really over the process is either gone or demoted to
+     * cached/background.
+     *
+     * Returns:
+     *  - true  — game process present and still foreground-grade: the session
+     *    is launching or playing, no matter what any binding or timeout says;
+     *  - false — process gone, or demoted below foreground grade: the session
+     *    is genuinely over (this is the only wipe justification);
+     *  - null  — unknown (bridge unreachable, or an older launcher without
+     *    this call). Unknown NEVER justifies a destructive action.
+     */
+    private fun gameLooksAlive(): Boolean? {
+        if (!ensureBridge()) return null
+        val state = ModSyncClient.gameState(this) ?: return null
+        if (!state.alive) return false
+        return state.importance <=
+            ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+    }
+
     private fun stepWatchdog() {
         if (mode == Mode.WATCHING) {
             WatchState.touch(this) // keeps the reboot marker fresh
@@ -450,22 +500,31 @@ class ModWatchService : Service() {
             val now = SystemClock.elapsedRealtime()
             if (everConnected) {
                 // Lost the binding. onBindingDied normally lands within a
-                // second; passive rebinds act as probes while we wait, and
-                // the grace covers missed signals. A reconnected probe means
-                // the game process is alive again — go back to healthy.
+                // second; passive rebinds act as probes while we wait.
                 if (!bindRegistered) bindLiveness(autoCreate = false)
                 if (now - disconnectedAt > LOST_GRACE_MS) {
-                    Log.e(TAG, "Liveness lost for >${LOST_GRACE_MS / 1000}s — treating game as ended")
-                    endSession(this, watchInstance ?: "")
+                    // The grace alone is NOT evidence. Ask the launcher: a
+                    // live :game process means the loss was spurious (ModInj
+                    // churn, service restart mid-launch) — keep waiting.
+                    when (gameLooksAlive()) {
+                        true -> disconnectedAt = now // game alive: re-arm, keep watching
+                        false -> {
+                            Log.e(TAG, "Liveness lost and launcher reports the game gone — wiping session")
+                            endSession(this, watchInstance ?: "")
+                        }
+                        null -> Log.i(TAG, "Liveness lost, launcher state unknown — waiting (never wipe on unknown)")
+                    }
                 }
             } else {
-                // Never connected (game process still booting). Retry the
-                // create-ref bind; wipe only if a bind WAS requested and then
-                // stayed silent for the full grace — that proves the game
-                // process never came up. A skipped bind proves nothing.
+                // Never connected (game process still booting). MC launches
+                // take MINUTES on phones, so a timeout here is meaningless —
+                // the launcher's game-state answer is the only destructive
+                // trigger: dead => the launch failed/aborted, wipe; alive =>
+                // keep waiting however long the boot takes; unknown => wait,
+                // never wipe (fail-safe).
                 if (!bindRegistered) bindLiveness(autoCreate = true)
-                if (bindRegistered && now - firstBindAt > BIND_FAIL_GRACE_MS) {
-                    Log.e(TAG, "Liveness never connected for >${BIND_FAIL_GRACE_MS / 1000}s — wiping orphaned session")
+                if (bindRegistered && gameLooksAlive() == false) {
+                    Log.e(TAG, "Never connected and launcher reports the game process gone — wiping orphaned session")
                     endSession(this, watchInstance ?: "")
                 }
             }
@@ -479,21 +538,51 @@ class ModWatchService : Service() {
                 staleInstance = null
                 probeBindRequested = false
                 mode = Mode.WATCHING
-                firstBindAt = SystemClock.elapsedRealtime()
                 bindLiveness(autoCreate = true) // upgrade to a create-ref binding
                 notifyGameState(target, ended = false)
-            } else if (requestProbeBind()) {
-                if (SystemClock.elapsedRealtime() - staleSince > STALE_PROBE_MS) {
-                    Log.e(TAG, "Stale probe found no live game — wiping session '$target'")
-                    unbindLiveness()
-                    staleInstance = null
-                    probeBindRequested = false
-                    mode = Mode.IDLE
-                    endSession(this, target)
+            } else {
+                // Probe silence proves NOTHING during a launch: the liveness
+                // service may not exist yet (only ModInj's AUTO_CREATE binding
+                // ever creates it, and that binding can have died with a
+                // previous ModInj process). So the launcher's game-state
+                // answer decides — never the probe timeout alone.
+                when (gameLooksAlive()) {
+                    true -> {
+                        // Launcher confirms a foreground-grade :game process:
+                        // adopt immediately. The AUTO_CREATE rebind creates the
+                        // liveness service inside the live process, so backups
+                        // and death detection resume from here.
+                        Log.i(TAG, "Launcher reports the game process alive — adopting session '$target'")
+                        watchInstance = target
+                        WatchState.mark(this, target)
+                        staleInstance = null
+                        probeBindRequested = false
+                        mode = Mode.WATCHING
+                        everConnected = false
+                        connected = false
+                        bindLiveness(autoCreate = true)
+                        notifyGameState(target, ended = false)
+                    }
+                    false -> {
+                        // Game process genuinely gone or demoted (its FGS
+                        // stopped => session over). Still respect the probe
+                        // window so a process mid-restart isn't misjudged.
+                        if (SystemClock.elapsedRealtime() - staleSince > STALE_PROBE_MS) {
+                            Log.e(TAG, "Stale probe: launcher reports game process gone — wiping session '$target'")
+                            unbindLiveness()
+                            staleInstance = null
+                            probeBindRequested = false
+                            mode = Mode.IDLE
+                            endSession(this, target)
+                        }
+                    }
+                    null -> {
+                        // Unknown (bridge down or old launcher): keep probing,
+                        // NEVER wipe without a real answer.
+                        requestProbeBind()
+                    }
                 }
             }
-            // else: the probe could not even be requested (bridge unreachable)
-            // — keep retrying on the next tick; NEVER wipe without a real probe.
         }
         // Mode.IDLE: nothing to do; new sessions arrive via onStartCommand.
     }
@@ -517,8 +606,30 @@ class ModWatchService : Service() {
         }
     }
 
+    /**
+     * Ends the session — but ONLY the session that actually ended.
+     *
+     * IDENTITY GUARD: the provider holds one global session, and destructive
+     * signals can arrive late (a GAME_ENDED from the previous run delivered
+     * to a freshly woken process, a binding death racing a new injection).
+     * Wiping whatever the provider currently holds would destroy a NEWER
+     * session's files mid-launch. So the destructive provider call happens
+     * only when the provider's current session still matches [instance], or
+     * when it holds none (endSession is idempotent), or when [instance] is
+     * empty (= the user's explicit Stop action, which always wipes).
+     */
     private fun endSession(context: Context, instance: String) {
-        val deleted = if (ensureBridge()) ModSyncClient.endSession(context) else -1
+        var deleted = -1
+        var wipeAllowed = false
+        if (ensureBridge()) {
+            val current = currentSessionInstance()
+            wipeAllowed = instance.isEmpty() || current == null || current == instance
+            if (wipeAllowed) {
+                deleted = ModSyncClient.endSession(context)
+            } else {
+                Log.w(TAG, "Wipe blocked: provider holds session '$current', not '$instance' (stale signal)")
+            }
+        }
         Log.i(TAG, "Session ended for '$instance', files wiped: $deleted")
         WatchState.clear(context)
         unbindLiveness()
@@ -527,7 +638,7 @@ class ModWatchService : Service() {
         probeBindRequested = false
         mode = Mode.IDLE
         watchInstance = null
-        if (instance.isNotEmpty()) notifyGameState(instance, ended = true)
+        if (wipeAllowed && instance.isNotEmpty()) notifyGameState(instance, ended = true)
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {

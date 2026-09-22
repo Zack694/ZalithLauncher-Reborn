@@ -52,6 +52,13 @@ class MainActivity : AppCompatActivity() {
     private val instances = ArrayList<String>()
     private var currentInstance: String? = null
     private var currentDirRel = ""
+    /**
+     * Rel-path prefix of the game home inside the provider's anchor space.
+     * Newer launchers anchor the provider at `<profile>/.minecraft` directly
+     * (prefix ""); older builds anchor at the bare profile root, where game
+     * data lives under `.minecraft/` (prefix ".minecraft"). Detected at load.
+     */
+    private var anchor = ""
     private val browseEntries = ArrayList<ModSyncClient.BrowseEntry>()
     private val checkedRelPaths = HashSet<String>()
     private lateinit var fileAdapter: FileAdapter
@@ -149,10 +156,7 @@ class MainActivity : AppCompatActivity() {
         fileList.adapter = fileAdapter
 
         instancePicker.setOnItemClickListener { _, _, position, _ ->
-            currentInstance = instances.getOrNull(position)
-            checkedRelPaths.clear()
-            openDir(instanceRootRel())
-            addButton.text = getString(R.string.add_selected, 0)
+            instances.getOrNull(position)?.let { selectInstance(it) }
         }
 
         addButton.setOnClickListener { addCheckedToVault() }
@@ -162,28 +166,63 @@ class MainActivity : AppCompatActivity() {
     /** Rel path (vs game home) of the instance's isolated directory. */
     private fun instanceRootRel(): String {
         val inst = currentInstance ?: return ""
-        return "versions/$inst"
+        return if (anchor.isEmpty()) "versions/$inst" else "$anchor/versions/$inst"
+    }
+
+    private fun displayRel(relPath: String): String =
+        if (anchor.isEmpty()) relPath else relPath.removePrefix("$anchor/")
+
+    /**
+     * Detects where `versions/` sits inside the provider's anchor space by
+     * listing the root: new anchors already ARE the game home (they contain
+     * `versions`); older ones expose game data under a `.minecraft` directory.
+     */
+    private fun detectAnchor(): String {
+        val root = ModSyncClient.list(this, ".") ?: return ""
+        if (root.any { it.isDir && it.name == "versions" }) return ""
+        if (root.any { it.isDir && it.name == ".minecraft" }) return ".minecraft"
+        return ""
     }
 
     private fun loadInstances() {
         fileExecutor.execute {
             ModSyncClient.ping(this)
-            val list = ModSyncClient.list(this, "versions")
+            anchor = detectAnchor()
+            val versionsRel = if (anchor.isEmpty()) "versions" else "$anchor/versions"
+            val list = ModSyncClient.list(this, versionsRel)
             runOnUiThread {
                 instances.clear()
-                if (list != null) {
+                if (list == null) {
+                    Toast.makeText(this, R.string.instances_load_failed, Toast.LENGTH_LONG).show()
+                } else {
                     list.filter { it.isDir }.forEach { instances.add(it.name) }
-                    instancePicker.setSimpleItems(instances.toTypedArray())
                 }
-                findViewById<View>(R.id.empty_files).visibility =
-                    if (instances.isEmpty()) View.VISIBLE else View.GONE
+                if (instances.isEmpty()) {
+                    findViewById<View>(R.id.empty_files).visibility = View.VISIBLE
+                } else {
+                    findViewById<View>(R.id.empty_files).visibility = View.GONE
+                    instancePicker.setSimpleItems(instances.toTypedArray())
+                    // Default-select the first instance (e.g. "1.21.11 Fabric")
+                    // so the Files tab is usable without extra taps.
+                    if (currentInstance == null || instances.indexOf(currentInstance) < 0) {
+                        selectInstance(instances[0])
+                    }
+                }
             }
         }
     }
 
+    private fun selectInstance(name: String) {
+        currentInstance = name
+        instancePicker.setText(name, false)
+        checkedRelPaths.clear()
+        addButton.text = getString(R.string.add_selected, 0)
+        openDir(instanceRootRel())
+    }
+
     private fun openDir(relPath: String) {
         currentDirRel = relPath
-        breadcrumb.text = getString(R.string.breadcrumb, currentInstance ?: "—", relPath.ifEmpty { "/" })
+        breadcrumb.text = getString(R.string.breadcrumb, currentInstance ?: "—", displayRel(relPath).ifEmpty { "/" })
         fileExecutor.execute {
             val list = ModSyncClient.list(this, relPath)
             runOnUiThread {

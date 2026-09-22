@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.FileObserver
 import android.os.ParcelFileDescriptor
 import com.google.gson.Gson
+import com.movtery.zalithlauncher.feature.customprofilepath.ProfilePathHome
 import com.movtery.zalithlauncher.feature.customprofilepath.ProfilePathManager
 import com.movtery.zalithlauncher.feature.log.Logging
 import com.movtery.zalithlauncher.utils.path.PathManager
@@ -323,12 +324,21 @@ class ModSyncProvider : ContentProvider() {
 
     // ----------------------------------------------------------- path resolve
 
-    /** Game home of the currently selected profile; falls back to the default. */
+    /**
+     * Game home of the currently selected profile; falls back to the default.
+     *
+     * MUST be the launcher's REAL game home — `<profile path>/.minecraft` (see
+     * [ProfilePathHome.getGameHome]) — because that is where `versions/<name>/`,
+     * `mods`, `saves` etc. actually live. Anchoring at the bare profile path
+     * (`Android/data/<pkg>/files/`) made every instance invisible to ModInj
+     * (empty Instances Drawer) and would have pointed injection at
+     * `files/versions/...` instead of `files/.minecraft/versions/...`.
+     */
     private fun gameHome(): File = runCatching {
-        File(ProfilePathManager.getCurrentPath())
+        File(ProfilePathHome.getGameHome())
     }.getOrElse { e ->
         Logging.e(TAG, "ProfilePathManager unavailable, using default game home", e)
-        File(PathManager.DIR_GAME_HOME)
+        File(PathManager.DIR_GAME_HOME, ".minecraft")
     }
 
     /** Canonicalizes and ensures the target stays inside [base]. Read operations. */

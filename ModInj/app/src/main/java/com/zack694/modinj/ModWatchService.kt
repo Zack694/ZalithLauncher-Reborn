@@ -89,11 +89,16 @@ class ModWatchService : Service() {
         // first — including the ACTION_BIND_LIVENESS path arriving straight
         // from the injection receiver — so ModInj is never killed mid-session.
         createChannel(this)
-        startForeground(
-            NOTIFICATION_ID,
-            buildNotification(getString(R.string.notif_watching)),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-        )
+        val notification = buildNotification(getString(R.string.notif_watching))
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
 
         if (intent?.action == ACTION_STOP_WATCH) {
             Log.i(TAG, "Stop requested — ending session if active")
@@ -121,11 +126,25 @@ class ModWatchService : Service() {
         if (receiversRegistered) return
         val filterEnded = IntentFilter(ModSyncClient.ACTION_GAME_ENDED)
         val filterChanged = IntentFilter(ModSyncClient.ACTION_FILE_CHANGED)
-        // 4-arg (permission-guarded) registration: only the launcher (same
-        // signature) can deliver to these, and it is exempt from the
-        // RECEIVER_EXPORTED flag requirement on Android 14+.
-        registerReceiver(endedReceiver, filterEnded, ModSyncClient.PERMISSION, null)
-        registerReceiver(fileChangedReceiver, filterChanged, ModSyncClient.PERMISSION, null)
+        if (Build.VERSION.SDK_INT >= 33) {
+            // These actions are NOT system broadcasts, so Android 13+/14+
+            // requires an explicit export flag. The broadcasts come from the
+            // LAUNCHER (a different app), so the receivers must be EXPORTED —
+            // the permission argument still restricts delivery to senders
+            // holding the launcher's signature-level MODSYNC permission.
+            registerReceiver(
+                endedReceiver, filterEnded, ModSyncClient.PERMISSION, null,
+                Context.RECEIVER_EXPORTED
+            )
+            registerReceiver(
+                fileChangedReceiver, filterChanged, ModSyncClient.PERMISSION, null,
+                Context.RECEIVER_EXPORTED
+            )
+        } else {
+            // Pre-13: permission guard only, no export flag concept.
+            registerReceiver(endedReceiver, filterEnded, ModSyncClient.PERMISSION, null)
+            registerReceiver(fileChangedReceiver, filterChanged, ModSyncClient.PERMISSION, null)
+        }
         receiversRegistered = true
     }
 

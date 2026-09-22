@@ -20,6 +20,7 @@
     <string name="start_watching">Start watching (foreground)</string>
     <string name="stop_watching">Stop watching</string>
     <string name="no_instances">No instances found. Is the launcher installed?</string>
+    <string name="instances_load_failed">Could not load instances from the launcher bridge — open ZalithLauncher once, then retry</string>
     <string name="size_b">%1$d B</string>
     <string name="size_kb">%1$.1f KB</string>
     <string name="size_mb">%1$.1f MB</string>

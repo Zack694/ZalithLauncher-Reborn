@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Granted automatically: signed with the same keystore as ZalithLauncher -->
+    <uses-permission android:name="com.movtery.zalithlauncher.permission.MODSYNC" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Package visibility (Android 11+): lets us bind the launcher's
+         GameLivenessService and show its package name in the UI. -->
+    <queries>
+        <package android:name="com.movtery.zalithlauncher" />
+        <package android:name="com.movtery.zalithlauncher.debug" />
+    </queries>
+
+    <application
+        android:name=".ModInjApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ModInj">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Receives the launcher's ordered "game starting" broadcast.
+             android:permission = only the launcher (signature) may send to it. -->
+        <receiver
+            android:name=".InjectionReceiver"
+            android:exported="true"
+            android:permission="com.movtery.zalithlauncher.permission.MODSYNC">
+            <intent-filter>
+                <action android:name="com.zack694.modinj.ACTION_GAME_STARTING" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".ModWatchService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Observes Minecraft mod/config file changes while the game runs and cleans up injected files when the game process ends or crashes." />
+        </service>
+    </application>
+</manifest>

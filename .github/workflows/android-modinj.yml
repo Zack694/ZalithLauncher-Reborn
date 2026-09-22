@@ -1,0 +1,53 @@
+name: Android CI ModInj
+
+# TEMPORARY companion-app workflow — builds ONLY the ModInj app (ModInj/ folder).
+# The launcher itself is built by the existing "Android CI" (android.yml),
+# which this file deliberately does NOT touch.
+#
+# ModInj source is hosted here temporarily so CI can sign the release APK with
+# the SAME MOVTERY keystore as the launcher (signature-paired bridge permission).
+# Once the release APK is confirmed working, ModInj/ and this workflow file
+# will be removed from the repo.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  BuildModInjRelease:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Decode Keystore
+        run: |
+          # Same movtery-key.jks the launcher release builds sign with
+          echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > $GITHUB_WORKSPACE/release.jks
+
+      - name: Build ModInj Release
+        env:
+          MOVTERY_KEYSTORE_PASSWORD: ${{ secrets.MOVTERY_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_ALIAS }}
+        run: |
+          chmod +x ModInj/gradlew
+          ModInj/gradlew -p ModInj assembleRelease --no-daemon \
+            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/release.jks \
+            -Pandroid.injected.signing.store.password=$MOVTERY_KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$MOVTERY_KEYSTORE_PASSWORD
+
+      - name: Upload ModInj Release
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModInj(Release)
+          path: ModInj/app/build/outputs/apk/release/*

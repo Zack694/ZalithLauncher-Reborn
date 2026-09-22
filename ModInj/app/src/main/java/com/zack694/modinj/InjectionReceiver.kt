@@ -14,8 +14,18 @@ import java.io.File
  * launcher continues booting the game.
  *
  * Manifest-declared + ordered broadcast: this wakes ModInj even if its process
- * was dead. Copying happens inside onReceive (goAsync) so the ordered
+ * was dead. Copying happens on a worker thread (goAsync) so the ordered
  * broadcast stays serialized until injection is complete.
+ *
+ * RESULT-CODE RULE (this rule fixes a real crash — do not "simplify" it away):
+ * once [goAsync] is called, the receiver's own pending result is RELEASED.
+ * Calling `setResultCode()` on the RECEIVER after that throws
+ * `IllegalStateException: Call while result is not pending` and kills the
+ * whole ModInj process mid-launch (which then cascades: the sticky service
+ * restarts, treats the live session as stale and wipes files while the game
+ * is still running). The ONLY valid target is the [PendingResult] returned by
+ * [goAsync] — so [inject] returns the code and the worker thread sets it on
+ * the pending result, right before finishing it.
  */
 class InjectionReceiver : BroadcastReceiver() {
     companion object {
@@ -33,24 +43,40 @@ class InjectionReceiver : BroadcastReceiver() {
 
         val pending = goAsync()
         Thread {
-            val result = try {
-                inject(context, instance, gameDir)
+            var result = ModSyncClient.RESULT_NO_SELECTION
+            try {
+                result = inject(context, instance, gameDir)
             } catch (t: Throwable) {
                 Log.e(TAG, "Injection failed (launch continues without mods)", t)
-                setResultCode(ModSyncClient.RESULT_NO_SELECTION)
-                ModSyncClient.RESULT_NO_SELECTION
             } finally {
-                pending.finish()
+                try {
+                    pending.setResultCode(result)
+                    pending.finish()
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Failed to close the injection window", t)
+                }
             }
             Log.i(TAG, "Injection window closed (result=$result)")
         }.start()
     }
 
+    /**
+     * Performs the injection and returns the ordered-broadcast result code.
+     * NEVER calls setResultCode() itself — the receiver's pending result is
+     * already released once goAsync() ran.
+     */
     private fun inject(context: Context, instance: String, gameDir: String): Int {
-        // Ordered broadcast result delivered to the launcher's latch.
+        // Cold-process guard: this broadcast can wake a dead ModInj process in
+        // which the bridge authority was never discovered — without a ping
+        // every provider call below would silently no-op.
+        if (ModSyncClient.authority == null && !ModSyncClient.ping(context)) {
+            Log.w(TAG, "Launcher bridge not found — skipping injection")
+            return ModSyncClient.RESULT_NO_SELECTION
+        }
+
         val entries = Vault.entriesForInstance(context, instance)
         if (entries.isEmpty()) {
-            setResultCode(ModSyncClient.RESULT_NO_SELECTION)
+            Log.i(TAG, "No vault selection for '$instance' — nothing to inject")
             return ModSyncClient.RESULT_NO_SELECTION
         }
 
@@ -89,7 +115,6 @@ class InjectionReceiver : BroadcastReceiver() {
             Log.w(TAG, "Nothing injected (vault blobs missing for ${entries.size} entries)")
         }
 
-        setResultCode(ModSyncClient.RESULT_INJECTED)
         return ModSyncClient.RESULT_INJECTED
     }
 }

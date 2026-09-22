@@ -36,6 +36,7 @@
     <string name="notif_watching">Watching game files</string>
     <string name="notif_watching_instance">Watching game files (instance: %1$s)</string>
     <string name="notif_game_ended">Game ended — selected files cleaned (instance: %1$s)</string>
+    <string name="notif_backed_up">Mid-game change saved (vault + backup): %1$s</string>
     <string name="notif_stop">Stop</string>
     <string name="cd_folder">Folder</string>
 </resources>

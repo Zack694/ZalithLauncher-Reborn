@@ -722,4 +722,6 @@
     <string name="recorder_surface_unavailable">Game surface is not ready yet</string>
     <string name="recorder_start_failed">Could not start recording: %1$s</string>
     <string name="recorder_saved">Recording saved: %1$s</string>
+    <string name="modsync_permission_label">ModInj bridge access</string>
+    <string name="modsync_permission_desc">Allows the ModInj companion app (signed with the same key) to manage selected mod files inside the launcher\'s game home.</string>
 </resources>

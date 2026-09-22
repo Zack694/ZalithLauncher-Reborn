@@ -27,8 +27,8 @@
     <permission
         android:name="com.movtery.zalithlauncher.permission.MODSYNC"
         android:protectionLevel="signature"
-        android:label="ModInj bridge access"
-        android:description="Allows the ModInj companion app (signed with the same key) to manage selected mod files inside the launcher's game home." />
+        android:label="@string/modsync_permission_label"
+        android:description="@string/modsync_permission_desc" />
 
     <application
         android:name="net.kdt.pojavlaunch.PojavApplication"

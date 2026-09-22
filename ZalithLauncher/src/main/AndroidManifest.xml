@@ -22,6 +22,14 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE"/>
 
+    <!-- ModInj bridge: signature-guarded access for the companion app -->
+    <uses-permission android:name="com.movtery.zalithlauncher.permission.MODSYNC" />
+    <permission
+        android:name="com.movtery.zalithlauncher.permission.MODSYNC"
+        android:protectionLevel="signature"
+        android:label="ModInj bridge access"
+        android:description="Allows the ModInj companion app (signed with the same key) to manage selected mod files inside the launcher's game home." />
+
     <application
         android:name="net.kdt.pojavlaunch.PojavApplication"
         android:allowBackup="true"
@@ -113,6 +121,23 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/provider_paths" />
         </provider>
+
+        <!-- ModInj bridge: signature-guarded file/bridge provider (runs in the
+             default :launcher process so it survives game crashes) -->
+        <provider
+            android:name="com.movtery.zalithlauncher.modsync.ModSyncProvider"
+            android:authorities="${applicationId}.modsync"
+            android:exported="true"
+            android:grantUriPermissions="false"
+            android:permission="com.movtery.zalithlauncher.permission.MODSYNC" />
+
+        <!-- ModInj bridge: no-op service inside the :game process; its binding
+             death tells ModInj the game process exited or crashed -->
+        <service
+            android:name="com.movtery.zalithlauncher.modsync.GameLivenessService"
+            android:process=":game"
+            android:exported="true"
+            android:permission="com.movtery.zalithlauncher.permission.MODSYNC" />
 
         <service
             android:name="net.kdt.pojavlaunch.services.ProgressService"

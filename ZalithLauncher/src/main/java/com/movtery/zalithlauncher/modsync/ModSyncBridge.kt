@@ -1,9 +1,9 @@
 package com.movtery.zalithlauncher.modsync
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
-import android.os.Bundle
-import android.os.ResultReceiver
 import com.movtery.zalithlauncher.feature.customprofilepath.ProfilePathManager
 import com.movtery.zalithlauncher.feature.log.Logging
 import java.io.File
@@ -39,8 +39,8 @@ object ModSyncBridge {
     @JvmStatic
     fun onGameStarting(activity: Activity, gameDir: File, instanceName: String) {
         val latch = CountDownLatch(1)
-        val receiver = object : ResultReceiver(null) {
-            override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
                 Logging.i(TAG, "ModInj acknowledged game-starting (code=$resultCode)")
                 latch.countDown()
             }

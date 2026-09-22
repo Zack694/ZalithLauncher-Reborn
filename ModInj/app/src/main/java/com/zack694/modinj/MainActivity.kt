@@ -1,10 +1,14 @@
 package com.zack694.modinj
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -73,6 +77,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var backupAdapter: BackupAdapter
     private var backupEntries: List<Vault.BackupEntry> = emptyList()
     private lateinit var watchButton: MaterialButton
+    private lateinit var keepAliveButton: MaterialButton
 
     private val fileExecutor = ThreadPool.single
 
@@ -357,6 +362,8 @@ class MainActivity : AppCompatActivity() {
         backupList.adapter = backupAdapter
         watchButton = findViewById(R.id.watch_toggle)
         watchButton.setOnClickListener { toggleWatch() }
+        keepAliveButton = findViewById(R.id.keep_alive)
+        keepAliveButton.setOnClickListener { requestKeepAlive() }
     }
 
     private fun toggleWatch() {
@@ -441,10 +448,61 @@ class MainActivity : AppCompatActivity() {
         else -> getString(R.string.size_b, bytes)
     }
 
+    /**
+     * AutoStart when the app is opened: the watch/backup foreground service
+     * comes up with the UI (idempotent — the service reconciles its own
+     * state), so injection windows, mid-game backups and game-end cleanup
+     * always have a live host without the user pressing anything.
+     */
+    override fun onStart() {
+        super.onStart()
+        ensureNotificationPermission()
+        runCatching {
+            ContextCompat.startForegroundService(this, Intent(this, ModWatchService::class.java))
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         refreshStatus()
         refreshVault()
         refreshBackups()
+        refreshKeepAliveLabel()
+    }
+
+    // ------------------------------------------------------- keep alive
+
+    private fun batteryExempt(): Boolean {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return pm.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun refreshKeepAliveLabel() {
+        keepAliveButton.setText(
+            if (batteryExempt()) R.string.keep_alive_active else R.string.keep_alive_request
+        )
+    }
+
+    /**
+     * "Keep alive on background": requests the battery-optimization
+     * exemption so Android (and OEM task killers) leave the foreground watch
+     * service — and with it mid-game backups and end-of-game cleanup — alone.
+     */
+    private fun requestKeepAlive() {
+        if (batteryExempt()) {
+            Toast.makeText(this, R.string.keep_alive_active, Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            @Suppress("BatteryLife")
+            startActivity(
+                Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        } catch (t: Throwable) {
+            Toast.makeText(this, R.string.keep_alive_unavailable, Toast.LENGTH_LONG).show()
+        }
     }
 }

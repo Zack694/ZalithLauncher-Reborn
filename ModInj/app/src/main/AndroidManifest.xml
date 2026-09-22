@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Package visibility (Android 11+): lets us bind the launcher's
          GameLivenessService and show its package name in the UI. -->
@@ -41,6 +43,27 @@
             android:permission="com.movtery.zalithlauncher.permission.MODSYNC">
             <intent-filter>
                 <action android:name="com.zack694.modinj.ACTION_GAME_STARTING" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Manifest fallback for "game ended": wakes ModInj even when the
+             watch service is dead so injected files are wiped immediately
+             instead of lingering until the next app open. -->
+        <receiver
+            android:name=".GameEndedReceiver"
+            android:exported="true"
+            android:permission="com.movtery.zalithlauncher.permission.MODSYNC">
+            <intent-filter>
+                <action android:name="com.zack694.modinj.ACTION_GAME_ENDED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Normal autostart: bring the watch service up after boot. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
 

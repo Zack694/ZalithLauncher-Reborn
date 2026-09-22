@@ -10,22 +10,46 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
+import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 
 /**
  * Foreground service that keeps ModInj alive for the whole game session so it
  * is never killed mid-game. It:
- *  - binds to the launcher's GameLivenessService (inside the `:game` process);
- *    when that binding dies the game process is gone (exit OR hard crash);
+ *  - binds to the launcher's GameLivenessService (inside the `:game` process —
+ *    the process that hosts the game UI + JVM). When that binding dies the
+ *    game process is gone: clean exit, hard crash, or force close — ALL paths;
  *  - receives mid-game FILE_CHANGED broadcasts and copies updated files into
  *    the backup store;
  *  - ends the session on GAME_ENDED / binding death — the provider then wipes
  *    exactly the injected files.
  *
- * Designed to be cheap: one runtime receiver set, one binding, no polling.
+ * LIFENESS BINDING — why BIND_AUTO_CREATE:
+ * the binding used to be flags=0 ("never auto-create"). But a non-AUTO_CREATE
+ * binding only ever attaches to an ALREADY-CREATED service, and nothing in the
+ * launcher creates GameLivenessService on its own — so with the current
+ * launcher build the binding would sit dormant forever and the crash/force-
+ * close detection would be dead code. AUTO_CREATE makes the system create the
+ * service (and the :game process, which the launcher needs moments later for
+ * the game anyway) and guarantees onBindingDied when that process dies.
+ * endSession() unbinds, releasing the create-ref, so ModInj never keeps an
+ * empty :game process alive after the game is done.
+ *
+ * STALE SESSIONS — adopt or wipe, never guess wrong in the destructive way:
+ * if the service starts and the provider still holds a session, the game is
+ * either still running (ModInj was killed mid-game) or long dead (reboot,
+ * force-stop). A passive (flags=0) probe binding connects only if the liveness
+ * service still exists (= game alive) — connect => adopt the session; no
+ * connect within the probe window => wipe. One override: if ModInj itself died
+ * while a session was live and the device did NOT reboot meanwhile, adopt
+ * directly (the probe cannot reconnect because the create-ref died with the
+ * old process). Reboots are detected via SystemClock.elapsedRealtime().
  */
 class ModWatchService : Service() {
     companion object {
@@ -36,13 +60,90 @@ class ModWatchService : Service() {
         const val ACTION_STOP_WATCH = "com.zack694.modinj.ACTION_STOP_WATCH"
         const val ACTION_BIND_LIVENESS = "com.zack694.modinj.ACTION_BIND_LIVENESS"
 
+        private const val WATCHDOG_INTERVAL_MS = 5_000L
+        private const val LOST_GRACE_MS = 15_000L        // connected once, then lost
+        private const val BIND_FAIL_GRACE_MS = 60_000L   // never connected, bind keeps failing
+        private const val STALE_PROBE_MS = 10_000L       // passive probe window for stale sessions
+
         var isRunning = false
             private set
     }
 
-    private var bound = false
+    /** ModInj-side session bookkeeping that survives process death. */
+    internal object WatchState {
+        private const val PREFS = "watch_state"
+        private const val KEY_WATCHING = "watching"
+        private const val KEY_INSTANCE = "instance"
+        private const val KEY_SINCE = "since"
+        private const val KEY_ELAPSED = "elapsed"
+
+        private fun prefs(context: Context): SharedPreferences =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+        fun mark(context: Context, instance: String) {
+            prefs(context).edit()
+                .putBoolean(KEY_WATCHING, true)
+                .putString(KEY_INSTANCE, instance)
+                .putLong(KEY_SINCE, System.currentTimeMillis())
+                .putLong(KEY_ELAPSED, SystemClock.elapsedRealtime())
+                .apply()
+        }
+
+        /** Keeps the reboot marker fresh while a session is live. */
+        fun touch(context: Context) {
+            prefs(context).edit()
+                .putLong(KEY_ELAPSED, SystemClock.elapsedRealtime())
+                .apply()
+        }
+
+        fun clear(context: Context) {
+            prefs(context).edit().putBoolean(KEY_WATCHING, false).apply()
+        }
+
+        data class State(val instance: String, val since: Long, val elapsedAtMark: Long)
+
+        fun snapshot(context: Context): State? {
+            val p = prefs(context)
+            if (!p.getBoolean(KEY_WATCHING, false)) return null
+            val instance = p.getString(KEY_INSTANCE, "").orEmpty()
+            if (instance.isEmpty()) return null
+            return State(instance, p.getLong(KEY_SINCE, 0L), p.getLong(KEY_ELAPSED, 0L))
+        }
+
+        /** True when the device rebooted after [state] was recorded. */
+        fun rebootedSince(context: Context, state: State): Boolean =
+            SystemClock.elapsedRealtime() < state.elapsedAtMark
+    }
+
+    private enum class Mode { IDLE, WATCHING, RESOLVING }
+
+    private var mode = Mode.IDLE
+
+    // Liveness binding state
+    private var bindRegistered = false     // bindService() succeeded; unbind required
+    private var connected = false          // onServiceConnected has fired
+    private var everConnected = false      // connected at least once for this session
+    private var firstBindAt = 0L           // first bind attempt of the current session
+    private var disconnectedAt = 0L        // when the binding was last observed lost
+
+    // Stale-session probe state (Mode.RESOLVING)
+    private var staleInstance: String? = null
+    private var staleSince = 0L
+
     private var receiversRegistered = false
     private var watchInstance: String? = null
+
+    private val watchdog = Handler(Looper.getMainLooper())
+    private val watchdogTick = object : Runnable {
+        override fun run() {
+            try {
+                stepWatchdog()
+            } catch (t: Throwable) {
+                Log.w(TAG, "Watchdog step failed: ${t.message}")
+            }
+            watchdog.postDelayed(this, WATCHDOG_INTERVAL_MS)
+        }
+    }
 
     private val endedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -63,25 +164,31 @@ class ModWatchService : Service() {
 
     private val livenessConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-            Log.i(TAG, "Bound to game liveness service")
+            connected = true
+            everConnected = true
+            Log.i(TAG, "Bound to game liveness service (game process alive)")
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
-            // Transient; process may still come back.
+            connected = false
+            disconnectedAt = SystemClock.elapsedRealtime()
             Log.w(TAG, "Liveness binding disconnected")
         }
 
         override fun onBindingDied(name: ComponentName?) {
-            // The :game process is GONE — this is the crash/exit signal.
+            // The :game process is GONE — clean exit, crash or force close all
+            // end here. This is the definitive game-death signal.
             Log.e(TAG, "Game process died — wiping injected files (crash-safe path)")
+            connected = false
+            unbindLiveness()
             endSession(applicationContext, watchInstance ?: "")
-            watchInstance?.let { notifyGameState(it, ended = true) }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
         isRunning = true
+        watchdog.post(watchdogTick)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -110,16 +217,79 @@ class ModWatchService : Service() {
         registerReceivers()
 
         if (intent?.action == ACTION_BIND_LIVENESS) {
-            // Game is actually starting now — the :game process exists.
-            Log.i(TAG, "Rebinding liveness at game start")
+            // Game is starting right now: InjectionReceiver just registered a
+            // fresh session. Bind AUTO_CREATE and watch it live or die.
+            val instance = currentSessionInstance() ?: ""
+            if (instance.isNotEmpty()) {
+                watchInstance = instance
+                WatchState.mark(this, instance)
+                mode = Mode.WATCHING
+                firstBindAt = SystemClock.elapsedRealtime()
+                everConnected = false
+                connected = false
+                bindLiveness(autoCreate = true)
+                notifyGameState(instance, ended = false)
+                Log.i(TAG, "Session adopted at game start: '$instance'")
+            } else {
+                Log.w(TAG, "BIND_LIVENESS without a provider session — resolving as stale")
+                startStaleResolve()
+            }
         } else {
-            // Recover from a previous crash where BOTH processes died: a stale
-            // session means injected files may still be lying around.
-            cleanupStaleSession()
+            // Boot autostart, app-open autostart or a STICKY restart: figure
+            // out whether a game session exists and what to do with it.
+            resolveSessionOnStart()
         }
 
-        bindLiveness()
         return START_STICKY
+    }
+
+    /**
+     * Entry-point reconciliation: adopt a live session, probe an ambiguous
+     * one, or go idle. Never wipes blindly — see the class doc.
+     */
+    private fun resolveSessionOnStart() {
+        val providerSession = currentSessionInstance()
+        if (providerSession == null) {
+            // No session at the provider: nothing to watch, nothing to wipe.
+            WatchState.clear(this)
+            mode = Mode.IDLE
+            watchInstance = null
+            Log.i(TAG, "No active session — service idle (watching for the next launch)")
+            return
+        }
+
+        val marker = WatchState.snapshot(this)
+        if (marker != null && marker.instance == providerSession && !WatchState.rebootedSince(this, marker)) {
+            // ModInj died while this exact session was live and the device did
+            // not reboot since: the game is very likely still running. Adopt.
+            Log.w(TAG, "Recovered mid-game (session='$providerSession') — resuming watch")
+            watchInstance = providerSession
+            mode = Mode.WATCHING
+            firstBindAt = SystemClock.elapsedRealtime()
+            everConnected = false
+            connected = false
+            bindLiveness(autoCreate = true)
+            notifyGameState(providerSession, ended = false)
+        } else {
+            // Ambiguous: probe passively, adopt on connect, wipe on timeout.
+            startStaleResolve(providerSession)
+        }
+    }
+
+    private fun startStaleResolve(instance: String? = null) {
+        val target = instance ?: currentSessionInstance()
+        if (target == null) {
+            WatchState.clear(this)
+            mode = Mode.IDLE
+            return
+        }
+        staleInstance = target
+        staleSince = SystemClock.elapsedRealtime()
+        mode = Mode.RESOLVING
+        everConnected = false
+        connected = false
+        bindLiveness(autoCreate = false) // passive probe: only connects if the service exists
+        Log.i(TAG, "Probing stale session '$target' for ${STALE_PROBE_MS / 1000}s")
     }
 
     private fun registerReceivers() {
@@ -148,20 +318,95 @@ class ModWatchService : Service() {
         receiversRegistered = true
     }
 
-    private fun bindLiveness() {
-        val pkg = ModSyncClient.launcherPackage ?: return
+    private fun bindLiveness(autoCreate: Boolean) {
+        unbindLiveness()
+        val pkg = ModSyncClient.launcherPackage ?: run {
+            // Discover the bridge lazily (fresh process may never have pinged).
+            if (!ModSyncClient.ping(this)) {
+                Log.w(TAG, "Liveness bind skipped: launcher bridge not found")
+                return
+            }
+            ModSyncClient.launcherPackage!!
+        }
         val intent = Intent().setClassName(pkg, "com.movtery.zalithlauncher.modsync.GameLivenessService")
-        bound = try {
-            // Flags = 0: never auto-create the :game process; only observe it
-            // while a game session is actually running.
-            bindService(intent, livenessConnection, 0)
+        bindRegistered = try {
+            bindService(intent, livenessConnection, if (autoCreate) Context.BIND_AUTO_CREATE else 0)
         } catch (t: Throwable) {
             Log.w(TAG, "Liveness bind failed: ${t.message}")
             false
         }
+        if (bindRegistered) {
+            Log.i(TAG, "Liveness bind requested (autoCreate=$autoCreate)")
+        }
     }
 
+    private fun unbindLiveness() {
+        if (bindRegistered) {
+            runCatching { unbindService(livenessConnection) }
+            bindRegistered = false
+        }
+        connected = false
+    }
+
+    private fun stepWatchdog() {
+        if (mode == Mode.WATCHING) {
+            WatchState.touch(this) // keeps the reboot marker fresh
+            if (connected) return
+            val now = SystemClock.elapsedRealtime()
+            if (everConnected) {
+                // Lost the binding. onBindingDied normally lands within a
+                // second; passive rebinds act as probes while we wait, and
+                // the grace covers missed signals. A reconnected probe means
+                // the game process is alive again — go back to healthy.
+                if (!bindRegistered) bindLiveness(autoCreate = false)
+                if (now - disconnectedAt > LOST_GRACE_MS) {
+                    Log.e(TAG, "Liveness lost for >${LOST_GRACE_MS / 1000}s — treating game as ended")
+                    endSession(this, watchInstance ?: "")
+                }
+            } else {
+                // Never connected (game process still booting, or the bridge
+                // is gone). Keep retrying the create-ref bind; wipe only if
+                // it stays down for the full grace.
+                if (!bindRegistered) bindLiveness(autoCreate = true)
+                if (now - firstBindAt > BIND_FAIL_GRACE_MS) {
+                    Log.e(TAG, "Liveness never connected for >${BIND_FAIL_GRACE_MS / 1000}s — wiping orphaned session")
+                    endSession(this, watchInstance ?: "")
+                }
+            }
+        } else if (mode == Mode.RESOLVING) {
+            val target = staleInstance ?: return
+            if (connected) {
+                // The liveness service exists => the game process is alive.
+                Log.i(TAG, "Stale probe connected — session '$target' is LIVE, adopting")
+                watchInstance = target
+                WatchState.mark(this, target)
+                staleInstance = null
+                mode = Mode.WATCHING
+                firstBindAt = SystemClock.elapsedRealtime()
+                bindLiveness(autoCreate = true) // upgrade to a create-ref binding
+                notifyGameState(target, ended = false)
+            } else if (SystemClock.elapsedRealtime() - staleSince > STALE_PROBE_MS) {
+                Log.e(TAG, "Stale probe found no live game — wiping session '$target'")
+                unbindLiveness()
+                staleInstance = null
+                mode = Mode.IDLE
+                endSession(this, target)
+            }
+        }
+        // Mode.IDLE: nothing to do; new sessions arrive via onStartCommand.
+    }
+
+    /**
+     * Makes sure the launcher bridge authority is discovered before ANY
+     * provider interaction. A freshly started process (manifest GAME_ENDED
+     * receiver, sticky restart, boot autostart) has authority == null — every
+     * ModSyncClient call silently no-ops until ping() runs once.
+     */
+    private fun ensureBridge(): Boolean =
+        ModSyncClient.authority != null || ModSyncClient.ping(this)
+
     private fun currentSessionInstance(): String? {
+        if (!ensureBridge()) return null
         val json = ModSyncClient.sessionState(this) ?: return null
         return try {
             org.json.JSONObject(json).optString("instance").ifEmpty { null }
@@ -170,33 +415,40 @@ class ModWatchService : Service() {
         }
     }
 
-    private fun cleanupStaleSession() {
-        val stale = ModSyncClient.sessionState(this) ?: return
-        val instance = try {
-            org.json.JSONObject(stale).optString("instance")
-        } catch (_: Exception) {
-            ""
-        }
-        Log.w(TAG, "Stale session found (instance='$instance') — cleaning up")
-        endSession(this, instance)
-    }
-
     private fun endSession(context: Context, instance: String) {
-        val deleted = ModSyncClient.endSession(context)
+        val deleted = if (ensureBridge()) ModSyncClient.endSession(context) else -1
         Log.i(TAG, "Session ended for '$instance', files wiped: $deleted")
+        WatchState.clear(context)
+        unbindLiveness()
+        everConnected = false
+        mode = Mode.IDLE
         watchInstance = null
         if (instance.isNotEmpty()) notifyGameState(instance, ended = true)
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Keep-alive: the user swiped ModInj from recents while a game session
+        // is live. Best-effort re-kick; START_STICKY covers the rest.
+        super.onTaskRemoved(rootIntent)
+        if (WatchState.snapshot(this) != null) {
+            try {
+                startForegroundService(Intent(this, ModWatchService::class.java))
+                Log.i(TAG, "Task removed with a live session — service re-kicked")
+            } catch (t: Throwable) {
+                Log.w(TAG, "Re-kick after task removal failed: ${t.message}")
+            }
+        }
+    }
+
     override fun onDestroy() {
         isRunning = false
+        watchdog.removeCallbacks(watchdogTick)
         if (receiversRegistered) {
             runCatching { unregisterReceiver(endedReceiver) }
             runCatching { unregisterReceiver(fileChangedReceiver) }
             receiversRegistered = false
         }
-        if (bound) runCatching { unbindService(livenessConnection) }
-        bound = false
+        unbindLiveness()
         super.onDestroy()
     }
 

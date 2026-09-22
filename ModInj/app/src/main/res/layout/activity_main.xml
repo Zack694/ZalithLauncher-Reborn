@@ -234,6 +234,15 @@
                     android:text="@string/start_watching"
                     app:icon="@drawable/ic_play" />
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/keep_alive"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_marginEnd="12dp"
+                    android:text="@string/keep_alive_request" />
+
                 <androidx.recyclerview.widget.RecyclerView
                     android:id="@+id/backup_list"
                     android:layout_width="match_parent"

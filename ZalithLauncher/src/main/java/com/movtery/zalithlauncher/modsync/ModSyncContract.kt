@@ -37,7 +37,13 @@ object ModSyncContract {
     const val CALL_SET_SESSION = "setSession"
     const val CALL_END_SESSION = "endSession"
     const val CALL_SESSION_STATE = "sessionState"
+    const val CALL_GAME_STATE = "gameState"
     const val CALL_PING = "ping"
+
+    /** Keys of the [CALL_GAME_STATE] result bundle. */
+    const val KEY_GAME_PROCESS_KNOWN = "gameProcessKnown"
+    const val KEY_GAME_PROCESS_ALIVE = "gameProcessAlive"
+    const val KEY_GAME_PROCESS_IMPORTANCE = "gameProcessImportance"
 
     /** Query/open/delete parameter: path relative to the current game home. */
     const val PARAM_PATH = "path"

@@ -17,6 +17,14 @@ import android.util.Log
  *
  * The provider's endSession is idempotent (no session => no-op), so a double
  * delivery (this receiver + the running service's runtime receiver) is safe.
+ *
+ * SESSION IDENTITY GUARD (v1.5.0): a GAME_ENDED can be delivered LATE — e.g.
+ * the process was dead when the game exited and this manifest receiver wakes
+ * it minutes later, after the user already relaunched and ModInj registered a
+ * NEW session. Wiping whatever the provider holds would destroy the new
+ * session's files mid-launch ("Game ended" while still launching). So the
+ * wipe only fires when the provider's current session still matches the
+ * instance this broadcast says ended (or holds none — then it is a no-op).
  */
 class GameEndedReceiver : BroadcastReceiver() {
     companion object {
@@ -34,7 +42,7 @@ class GameEndedReceiver : BroadcastReceiver() {
                 val deleted = if (
                     ModSyncClient.authority != null || ModSyncClient.ping(context)
                 ) {
-                    ModSyncClient.endSession(context)
+                    endSessionIfCurrent(context, instance)
                 } else -1
                 ModWatchService.WatchState.clear(context)
                 Log.i(TAG, "GAME_ENDED received: instance='$instance', files wiped=$deleted")
@@ -44,5 +52,28 @@ class GameEndedReceiver : BroadcastReceiver() {
                 pending.finish()
             }
         }.start()
+    }
+
+    /**
+     * Wipes through the provider only when its current session is still the
+     * one this broadcast reports as ended. Returns the deleted-file count,
+     * or -2 when the wipe was blocked as a stale signal (nothing deleted).
+     */
+    private fun endSessionIfCurrent(context: Context, instance: String): Int {
+        val currentJson = ModSyncClient.sessionState(context) ?: return ModSyncClient.endSession(context)
+        val currentInstance = try {
+            org.json.JSONObject(currentJson).optString("instance").ifEmpty { null }
+        } catch (_: Exception) {
+            null
+        }
+        return if (instance.isEmpty() || currentInstance == instance) {
+            ModSyncClient.endSession(context)
+        } else {
+            Log.w(
+                TAG,
+                "Stale GAME_ENDED for '$instance' ignored — provider session is '$currentInstance'"
+            )
+            -2
+        }
     }
 }

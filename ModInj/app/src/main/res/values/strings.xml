@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ModInj</string>
+    <string name="status_connected">Bridge connected · %1$s</string>
+    <string name="status_disconnected">Launcher bridge not found — install/launch ZalithLauncher (same signature)</string>
+    <string name="tab_files">Files</string>
+    <string name="tab_vault">Vault</string>
+    <string name="tab_backups">Backups</string>
+    <string name="pick_instance">Instance</string>
+    <string name="breadcrumb">%1$s › %2$s</string>
+    <string name="add_selected">Add %1$d to Vault</string>
+    <string name="added_n">Added %1$d file(s) to vault</string>
+    <string name="browse_failed">Could not list directory (launcher running?)</string>
+    <string name="pick_instance_first">Pick an instance first</string>
+    <string name="folder">folder</string>
+    <string name="remove">Remove</string>
+    <string name="restore">Restore</string>
+    <string name="restore_ok">Backup restored into vault — next launch injects it</string>
+    <string name="restore_fail">Restore failed</string>
+    <string name="start_watching">Start watching (foreground)</string>
+    <string name="stop_watching">Stop watching</string>
+    <string name="no_instances">No instances found. Is the launcher installed?</string>
+    <string name="size_b">%1$d B</string>
+    <string name="size_kb">%1$.1f KB</string>
+    <string name="size_mb">%1$.1f MB</string>
+    <string name="empty_vault">Vault is empty — pick files in the Files tab</string>
+    <string name="empty_backups">No backups yet — mid-game changes appear here</string>
+    <string name="vault_hint">Selected files are injected into their instance on every launch:</string>
+    <string name="backups_hint">Mid-game changes captured while playing. Restore copies a file back into the vault:</string>
+
+    <!-- Foreground service notifications -->
+    <string name="notif_watching">Watching game files</string>
+    <string name="notif_watching_instance">Watching game files (instance: %1$s)</string>
+    <string name="notif_game_ended">Game ended — selected files cleaned (instance: %1$s)</string>
+    <string name="notif_stop">Stop</string>
+    <string name="cd_folder">Folder</string>
+</resources>

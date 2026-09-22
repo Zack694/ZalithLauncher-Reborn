@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="md_surface_night">#FF101410</color>
+    <color name="md_on_surface_night">#FFE1E3DE</color>
+    <color name="md_surface_variant_night">#FF414941</color>
+    <color name="md_on_surface_variant_night">#FFC1C9BE</color>
+    <color name="md_primary_container_night">#FF81D99E</color>
+    <color name="md_on_primary_container_night">#FF003919</color>
+</resources>

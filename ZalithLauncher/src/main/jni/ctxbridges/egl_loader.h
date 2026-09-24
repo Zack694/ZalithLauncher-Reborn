@@ -12,6 +12,7 @@ extern EGLBoolean (*eglTerminate_p) (EGLDisplay dpy);
 extern EGLBoolean (*eglReleaseThread_p) (void);
 extern EGLContext (*eglGetCurrentContext_p) (void);
 extern EGLDisplay (*eglGetDisplay_p) (NativeDisplayType display);
+extern EGLDisplay (*eglGetPlatformDisplay_p) (EGLenum platform, void* native_display, const EGLint* attrib_list);
 extern EGLBoolean (*eglInitialize_p) (EGLDisplay dpy, EGLint *major, EGLint *minor);
 extern EGLBoolean (*eglChooseConfig_p) (EGLDisplay dpy, const EGLint *attrib_list, EGLConfig *configs, EGLint config_size, EGLint *num_config);
 extern EGLBoolean (*eglGetConfigAttrib_p) (EGLDisplay dpy, EGLConfig config, EGLint attribute, EGLint *value);
@@ -22,10 +23,14 @@ extern EGLBoolean (*eglSwapBuffers_p) (EGLDisplay dpy, EGLSurface draw);
 extern EGLint (*eglGetError_p) (void);
 extern EGLContext (*eglCreateContext_p) (EGLDisplay dpy, EGLConfig config, EGLContext share_list, const EGLint *attrib_list);
 extern EGLBoolean (*eglSwapInterval_p) (EGLDisplay dpy, EGLint interval);
+extern EGLBoolean (*eglSurfaceAttrib_p) (EGLDisplay dpy, EGLSurface surface, EGLint attribute, EGLint value);
 extern EGLSurface (*eglGetCurrentSurface_p) (EGLint readdraw);
 extern EGLBoolean (*eglQuerySurface_p)(EGLDisplay display, EGLSurface surface, EGLint attribute, EGLint * value);
+extern const char* (*eglQueryString_p)(EGLDisplay display, EGLint name);
 extern __eglMustCastToProperFunctionPointerType (*eglGetProcAddress_p) (const char *procname);
 
 void dlsym_EGL();
+void* zalith_egl_get_handle(void);
+const char* zalith_egl_get_loaded_name(void);
 
 #endif //POJAVLAUNCHER_EGL_LOADER_H

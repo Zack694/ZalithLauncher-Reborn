@@ -44,12 +44,14 @@ public class HotbarView extends View implements View.OnLayoutChangeListener, Run
         @Override
         public void onGrabState(boolean isGrabbing) {
             mLastIndex = -1;
+            mLastTapIndex = -1;
             mDropGesture.cancel();
         }
     };
 
     private int mWidth;
-    private int mLastIndex = -1;
+    private int mLastIndex = -1; // last slot sent during the current gesture (slide dedupe)
+    private int mLastTapIndex = -1; // slot of the previous tap-down (for double-tap = F)
     private int mGuiScale;
 
     //调整判定框宽高时，用这个动画播放器播放一个淡化动画，来给用户一个当前判定框范围的反馈
@@ -178,12 +180,27 @@ public class HotbarView extends View implements View.OnLayoutChangeListener, Run
             return true;
         }
         int hotbarIndex = (int)MathUtils.map(x, 0, mWidth, 0, HOTBAR_KEYS.length);
-        // Check if the slot changed and we need to make a key press
-        if(hotbarIndex == mLastIndex) {
-            // Only check for doubletapping if the slot has not changed
-            if (hasDoubleTapped && !AllStaticSettings.disableDoubleTap) CallbackBridge.sendKeyPress(LwjglGlfwKeycode.GLFW_KEY_F);
+
+        if (actionMasked == MotionEvent.ACTION_DOWN) {
+            // A fresh tap ALWAYS selects its slot. mLastIndex only tracks what this view
+            // last sent, not the game's real selected slot - a custom control button,
+            // scrolling, a keyboard or the game itself may have changed the slot since,
+            // so deduplicating here made re-tapping the same slot do nothing.
+            boolean sameSlotAsLastTap = hotbarIndex == mLastTapIndex;
+            mLastTapIndex = hotbarIndex;
+            mLastIndex = hotbarIndex;
+            CallbackBridge.sendKeyPress(HOTBAR_KEYS[hotbarIndex]);
+            // Double tap on the same slot = swap to offhand (after the slot is selected)
+            if (sameSlotAsLastTap && hasDoubleTapped && !AllStaticSettings.disableDoubleTap) {
+                CallbackBridge.sendKeyPress(LwjglGlfwKeycode.GLFW_KEY_F);
+            }
+            mDropGesture.cancel();
+            if(!isLastEventInGesture(actionMasked)) mDropGesture.submit();
             return true;
         }
+
+        // While sliding, only send a key when the finger crosses into another slot
+        if(hotbarIndex == mLastIndex) return true;
         mLastIndex = hotbarIndex;
         int hotbarKey = HOTBAR_KEYS[hotbarIndex];
         CallbackBridge.sendKeyPress(hotbarKey);

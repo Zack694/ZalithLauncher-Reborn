@@ -3,6 +3,7 @@ package com.movtery.zalithlauncher.modsync
 import android.app.ActivityManager
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.database.Cursor
 import android.database.MatrixCursor

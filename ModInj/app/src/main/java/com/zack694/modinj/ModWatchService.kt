@@ -238,6 +238,16 @@ class ModWatchService : Service() {
             Log.i(TAG, "Bound to game liveness service (game process alive)")
         }
 
+        // Launcher builds before v1.5.1 return a null binder from
+        // GameLivenessService.onBind(); Android then calls onNullBinding()
+        // instead of onServiceConnected(). The service (and the :game process)
+        // still exists, so treat it as connected.
+        override fun onNullBinding(name: ComponentName?) {
+            connected = true
+            everConnected = true
+            Log.i(TAG, "Bound to game liveness service (null binder, game process alive)")
+        }
+
         override fun onServiceDisconnected(name: ComponentName?) {
             connected = false
             disconnectedAt = SystemClock.elapsedRealtime()

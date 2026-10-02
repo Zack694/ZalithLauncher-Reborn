@@ -1,5 +1,6 @@
 package com.movtery.zalithlauncher.modsync
 
+import android.app.ActivityManager
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Intent
@@ -197,6 +198,45 @@ class ModSyncProvider : ContentProvider() {
             ModSyncContract.CALL_SESSION_STATE -> {
                 val current = synchronized(lock) { session }
                 if (current == null) null else Bundle().apply { putString("session", gson.toJson(current)) }
+            }
+
+            ModSyncContract.CALL_GAME_STATE -> {
+                // Positive-evidence game liveness for ModInj's watchdog.
+                //
+                // getRunningAppProcesses() returns only the CALLING UID's own
+                // processes — which here is the launcher app itself, including
+                // its `:game` process. That gives ModInj a truth source that is
+                // independent of binding silence: while a session is launching
+                // or playing, the game activity plus GameService (an FGS inside
+                // `:game`) hold the process at foreground/FGS importance; once
+                // the session is really over the process is either gone or
+                // demoted to cached/background importance.
+                //
+                // Fail-safe contract: `gameProcessKnown=false` means the scan
+                // itself was unusable (null/empty process list on some OEMs).
+                // ModInj treats that as UNKNOWN and never wipes on it — the
+                // launcher's own process missing from the list is the tell
+                // that the API did not deliver.
+                val activityManager =
+                    context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                val procs = activityManager?.runningAppProcesses
+                val known = !procs.isNullOrEmpty()
+                var alive = false
+                var importance = 0
+                val target = context.packageName + ":game"
+                for (info in procs.orEmpty()) {
+                    if (info.processName == target) {
+                        alive = true
+                        importance = info.importance
+                        break
+                    }
+                }
+                Logging.d(TAG, "gameState: $target known=$known alive=$alive importance=$importance")
+                Bundle().apply {
+                    putBoolean(ModSyncContract.KEY_GAME_PROCESS_KNOWN, known)
+                    putBoolean(ModSyncContract.KEY_GAME_PROCESS_ALIVE, alive)
+                    putInt(ModSyncContract.KEY_GAME_PROCESS_IMPORTANCE, importance)
+                }
             }
 
             else -> throw IllegalArgumentException("Unknown method: $method")

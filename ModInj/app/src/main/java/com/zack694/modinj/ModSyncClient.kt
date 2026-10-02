@@ -33,6 +33,10 @@ object ModSyncClient {
     private const val CALL_SET_SESSION = "setSession"
     private const val CALL_END_SESSION = "endSession"
     private const val CALL_SESSION_STATE = "sessionState"
+    private const val CALL_GAME_STATE = "gameState"
+    private const val KEY_GAME_KNOWN = "gameProcessKnown"
+    private const val KEY_GAME_ALIVE = "gameProcessAlive"
+    private const val KEY_GAME_IMPORTANCE = "gameProcessImportance"
     private const val PARAM_PATH = "path"
 
     private val CANDIDATE_PACKAGES = listOf(
@@ -205,6 +209,40 @@ object ModSyncClient {
             null
         }
     }
+
+    /**
+     * Positive-evidence game liveness, straight from the launcher.
+     *
+     * The launcher reports whether its own `:game` process is running right
+     * now, plus that process's oom importance. Returns null when the bridge is
+     * unavailable, the launcher predates this call, or the launcher's own
+     * process scan was unusable — callers MUST treat null as "unknown" and
+     * never act destructively on it.
+     */
+    fun gameState(context: Context): GameState? {
+        val auth = authority ?: return null
+        return try {
+            val bundle = context.contentResolver.call(
+                Uri.parse("content://$auth"), CALL_GAME_STATE, null, null
+            ) ?: return null
+            if (!bundle.getBoolean(KEY_GAME_KNOWN, false)) return null
+            GameState(
+                alive = bundle.getBoolean(KEY_GAME_ALIVE, false),
+                importance = bundle.getInt(KEY_GAME_IMPORTANCE, 0)
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Launcher-reported game-process state.
+     * @param alive true when the launcher's `:game` process is running.
+     * @param importance its oom importance; while a session launches or plays,
+     *   the game activity plus GameService (FGS) hold it at foreground-service
+     *   level (125) or better. A finished session is either gone or cached.
+     */
+    data class GameState(val alive: Boolean, val importance: Int)
 
     data class BrowseEntry(
         val name: String,

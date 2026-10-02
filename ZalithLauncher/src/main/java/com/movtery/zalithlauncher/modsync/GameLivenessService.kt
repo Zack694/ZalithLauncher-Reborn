@@ -2,6 +2,7 @@ package com.movtery.zalithlauncher.modsync
 
 import android.app.Service
 import android.content.Intent
+import android.os.Binder
 import android.os.IBinder
 import com.movtery.zalithlauncher.feature.log.Logging
 
@@ -33,5 +34,13 @@ class GameLivenessService : Service() {
         super.onDestroy()
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    /**
+     * MUST return a real binder: with a null binder Android never calls
+     * ModInj's onServiceConnected (API 28+ only fires onNullBinding), so
+     * ModInj would never see the game as "connected" and could only rely on
+     * timeouts. A plain Binder is enough; its death is what ModInj observes.
+     */
+    private val binder = Binder()
+
+    override fun onBind(intent: Intent?): IBinder = binder
 }

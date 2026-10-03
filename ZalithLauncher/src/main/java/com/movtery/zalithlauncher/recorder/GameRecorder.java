@@ -1,5 +1,8 @@
 package com.movtery.zalithlauncher.recorder;
 
+import android.os.SystemClock;
+import android.view.Display;
+import android.hardware.display.DisplayManager;
 import android.content.Context;
 import android.graphics.SurfaceTexture;
 import android.opengl.EGLSurface;
@@ -261,6 +264,20 @@ public final class GameRecorder {
         private Surface captureSurface;
         private final float[] texMatrix = new float[16];
 
+        // Display present pacing. The display window uses swap interval 0 so
+        // eglSwapBuffers never blocks this thread on vsync / display back-pressure
+        // (that used to add up to ~1-2 frames of input lag while recording and
+        // delayed the relay pass). To keep the game from running uncapped - which
+        // a non-blocking consumer would otherwise allow - we latch capture frames
+        // at most once per display refresh, and always latch the NEWEST queued
+        // frame (older queued ones are skipped instead of shown late).
+        private static final int MAX_LATCH_PER_DRAW = 4;
+        private int pendingFrames = 0;           // frames queued since the last latch (GL thread only)
+        private long lastLatchNanos = 0;
+        private long presentIntervalNanos = 16_666_667L;
+        private long refreshCheckNanos = 0;
+        private boolean displayNonBlocking = false;
+
         // Encoder + relay state.
         private Mp4Muxer muxer;
         private VideoEncoder videoEncoder;
@@ -421,11 +438,22 @@ public final class GameRecorder {
             //    it, so retry briefly; this also synchronizes the hand-off.
             displayWindow = claimDisplayWithRetry();
 
+            // 3b) Non-blocking display presents (see the pacing fields). If the
+            //     driver refuses interval 0 we keep the old blocking behaviour,
+            //     which needs no extra pacing.
+            displayNonBlocking = displayWindow.setSwapInterval(0);
+            updatePresentInterval(System.nanoTime());
+            eglCore.makeCurrent(offscreen);
+            RecorderLog.log(appContext, "display present: "
+                    + (displayNonBlocking ? "non-blocking, paced to " : "blocking (swap interval 0 unsupported), ")
+                    + Math.round(1e9 / presentIntervalNanos) + " Hz");
+
             // 4) Start delivering frames now that we own the display surface.
+            //    The listener runs on this thread (handler), so pendingFrames
+            //    needs no synchronization.
             captureTexture.setOnFrameAvailableListener(st -> {
-                if (handler != null) {
-                    handler.sendEmptyMessage(MSG_FRAME);
-                }
+                pendingFrames++;
+                scheduleDraw();
             }, handler);
 
             // 5) Spin up the hardware encoder.
@@ -790,16 +818,68 @@ public final class GameRecorder {
 
         // -- per-frame compositing -----------------------------------------
 
+        /** Current display refresh interval; re-read about once per second (adaptive refresh). */
+        private void updatePresentInterval(long now) {
+            if (refreshCheckNanos != 0 && now - refreshCheckNanos < 1_000_000_000L) {
+                return;
+            }
+            refreshCheckNanos = now;
+            float hz = 60f;
+            try {
+                DisplayManager dm = appContext.getSystemService(DisplayManager.class);
+                Display d = dm != null ? dm.getDisplay(Display.DEFAULT_DISPLAY) : null;
+                if (d != null && d.getRefreshRate() >= 20f) {
+                    hz = d.getRefreshRate();
+                }
+            } catch (Throwable ignored) {
+            }
+            presentIntervalNanos = (long) (1e9 / hz);
+        }
+
+        /**
+         * Posts one MSG_FRAME (never duplicates). With non-blocking presents the
+         * draw is held back until one refresh interval after the last latch, so
+         * the game is paced to the display rate exactly like before - just
+         * without this thread sleeping inside eglSwapBuffers.
+         */
+        private void scheduleDraw() {
+            if (handler == null || handler.hasMessages(MSG_FRAME)) {
+                return;
+            }
+            if (!displayNonBlocking || lastLatchNanos == 0) {
+                handler.sendEmptyMessage(MSG_FRAME);
+                return;
+            }
+            long due = lastLatchNanos + presentIntervalNanos - presentIntervalNanos / 8;
+            long wait = due - System.nanoTime();
+            if (wait <= 0) {
+                handler.sendEmptyMessage(MSG_FRAME);
+            } else {
+                handler.sendEmptyMessageAtTime(MSG_FRAME,
+                        SystemClock.uptimeMillis() + (wait + 999_999L) / 1_000_000L);
+            }
+        }
+
         private void drawFrame() {
             if (captureTexture == null || displayWindow == null) {
                 return;
             }
+            // Latch the NEWEST queued frame: each updateTexImage() acquires the
+            // next queued buffer (releasing the previous one back to the game),
+            // so calling it once per pending frame skips stale frames instead of
+            // showing them late. Extra calls with an empty queue are harmless.
+            int latches = Math.min(Math.max(1, pendingFrames), MAX_LATCH_PER_DRAW);
+            pendingFrames = 0;
             try {
-                captureTexture.updateTexImage();
+                for (int i = 0; i < latches; i++) {
+                    captureTexture.updateTexImage();
+                }
                 captureTexture.getTransformMatrix(texMatrix);
             } catch (Exception e) {
                 return;
             }
+            lastLatchNanos = System.nanoTime();
+            updatePresentInterval(lastLatchNanos);
 
             // 1) Present to the display first (full game resolution) so the player
             //    sees frames with minimal latency. This path does NOT touch the

@@ -142,6 +142,11 @@ public final class EglCore {
         }
     }
 
+    /** Sets the swap interval of the CURRENT draw surface (0 = never wait for vsync). */
+    public boolean setSwapInterval(int interval) {
+        return EGL14.eglSwapInterval(mEglDisplay, interval);
+    }
+
     public boolean swapBuffers(EGLSurface eglSurface) {
         return EGL14.eglSwapBuffers(mEglDisplay, eglSurface);
     }

@@ -29,6 +29,12 @@ public final class WindowSurface {
         return mEglCore.swapBuffers(mEglSurface);
     }
 
+    /** Makes this surface current and sets its swap interval. */
+    public boolean setSwapInterval(int interval) {
+        makeCurrent();
+        return mEglCore.setSwapInterval(interval);
+    }
+
     public void setPresentationTime(long nsecs) {
         mEglCore.setPresentationTime(mEglSurface, nsecs);
     }

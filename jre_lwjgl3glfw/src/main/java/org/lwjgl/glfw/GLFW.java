@@ -1195,16 +1195,12 @@ public class GLFW
     public static void glfwWaitEvents() {}
 
     public static void glfwWaitEventsTimeout(double timeout) {
-        // Boardwalk: this isn't how you do a frame limiter, but oh well
-        // System.out.println("Frame limiter");
-    /*
-        try {
-            Thread.sleep((long)(timeout * 1000));
-        } catch (InterruptedException ie) {
+        if (timeout > 0.0) {
+            long nanos = (long) (Math.min(timeout, 0.25) * 1_000_000_000.0);
+            if (nanos > 0L) {
+                java.util.concurrent.locks.LockSupport.parkNanos(nanos);
+            }
         }
-    */
-        // System.out.println("Out of the frame limiter");
-
     }
 
     public static void glfwPostEmptyEvent() {}

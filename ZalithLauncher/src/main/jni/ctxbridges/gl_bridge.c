@@ -61,7 +61,7 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
     EGLint egl_attributes[] = { EGL_BLUE_SIZE, 8,
                     EGL_GREEN_SIZE, 8,
                     EGL_RED_SIZE, 8,
-                    EGL_ALPHA_SIZE, 8,
+                    EGL_ALPHA_SIZE, 0,
                     EGL_DEPTH_SIZE, 24,
                     EGL_SURFACE_TYPE,
                     EGL_WINDOW_BIT|EGL_PBUFFER_BIT,
@@ -104,10 +104,19 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
         if (!bindResult) printf("EGLBridge: bind failed: %p\n", eglGetError_p());
     }
 
-    int libgl_es = strtol(getenv("LIBGL_ES"), NULL, 0);
-    if (libgl_es < 0 || libgl_es > INT16_MAX) libgl_es = 2;
+    const char* libgl_es_str = getenv("LIBGL_ES");
+    int libgl_es = libgl_es_str != NULL ? strtol(libgl_es_str, NULL, 0) : 2;
+    if (libgl_es <= 0 || libgl_es > INT16_MAX) libgl_es = 2;
+    const EGLint egl_noerror_context_attributes[] = {
+        EGL_CONTEXT_CLIENT_VERSION, libgl_es,
+        0x31B3 /* EGL_CONTEXT_OPENGL_NO_ERROR_KHR */, EGL_TRUE,
+        EGL_NONE
+    };
     const EGLint egl_context_attributes[] = { EGL_CONTEXT_CLIENT_VERSION, libgl_es, EGL_NONE };
-    bundle->context = eglCreateContext_p(g_EglDisplay, bundle->config, share == NULL ? EGL_NO_CONTEXT : share->context, egl_context_attributes);
+    bundle->context = eglCreateContext_p(g_EglDisplay, bundle->config, share == NULL ? EGL_NO_CONTEXT : share->context, egl_noerror_context_attributes);
+    if (bundle->context == EGL_NO_CONTEXT) {
+        bundle->context = eglCreateContext_p(g_EglDisplay, bundle->config, share == NULL ? EGL_NO_CONTEXT : share->context, egl_context_attributes);
+    }
 
     if (bundle->context == EGL_NO_CONTEXT)
     {

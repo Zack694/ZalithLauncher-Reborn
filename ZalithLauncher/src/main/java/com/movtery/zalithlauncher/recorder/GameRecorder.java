@@ -691,7 +691,7 @@ public final class GameRecorder {
 
                     int drop = (int) Math.floor(pos);
                     if (drop > pendFrames) drop = pendFrames;
-                    if (drop > 0) {
+                    if (drop >= 4096 || (drop > 0 && (pendFrames + 2048) * ch > pend.length)) {
                         System.arraycopy(pend, drop * ch, pend, 0, (pendFrames - drop) * ch);
                         pendFrames -= drop;
                         pos -= drop;

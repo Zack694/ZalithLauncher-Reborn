@@ -245,7 +245,9 @@ object LaunchGame {
                 }
             }
 
-            JREUtils.redirectAndPrintJRELog()
+            if (AllSettings.enableLogOutput.getValue()) {
+                JREUtils.redirectAndPrintJRELog()
+            }
             launchJvm(activity, account, minecraftVersion, javaRuntime, customArgs)
             // ModInj bridge: JVM returned -> clean exit; tell ModInj to wipe the
             // selected files. Crash exits never reach this line; ModInj instead

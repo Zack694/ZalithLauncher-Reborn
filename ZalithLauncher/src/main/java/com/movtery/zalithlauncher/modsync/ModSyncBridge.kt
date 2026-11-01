@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.HandlerThread
 import com.movtery.zalithlauncher.feature.customprofilepath.ProfilePathManager
 import com.movtery.zalithlauncher.feature.log.Logging
 import java.io.File
@@ -57,17 +59,21 @@ object ModSyncBridge {
 
         Logging.i(TAG, "Opening ModInj injection window for '$instanceName'")
 
-        activity.sendOrderedBroadcast(
-            intent,
-            ModSyncContract.PERMISSION,
-            receiver,
-            null,
-            Activity.RESULT_OK,
-            null,
-            null
-        )
-
-        val injected = latch.await(INJECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        val callbackThread = HandlerThread("ModSync-Callback").apply { start() }
+        val injected = try {
+            activity.sendOrderedBroadcast(
+                intent,
+                ModSyncContract.PERMISSION,
+                receiver,
+                Handler(callbackThread.looper),
+                Activity.RESULT_OK,
+                null,
+                null
+            )
+            latch.await(INJECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        } finally {
+            callbackThread.quitSafely()
+        }
         Logging.i(
             TAG,
             if (injected) "Injection window closed (ModInj responded)"

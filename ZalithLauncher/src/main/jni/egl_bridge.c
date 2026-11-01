@@ -47,6 +47,7 @@ struct PotatoBridge potatoBridge;
 
 void* loadTurnipVulkan();
 void calculateFPS();
+void bigcore_set_affinity();
 
 EXTERNAL_API void pojavTerminate() {
     printf("EGLBridge: Terminating\n");
@@ -117,12 +118,11 @@ void load_vulkan() {
 
 int pojavInitOpenGL() {
     const char *forceVsync = getenv("FORCE_VSYNC");
-    if (!strcmp(forceVsync, "true"))
+    if (forceVsync != NULL && !strcmp(forceVsync, "true"))
         pojav_environ->force_vsync = true;
 
     const char *renderer = getenv("POJAV_RENDERER");
-
-    load_vulkan();
+    if (renderer == NULL) renderer = "opengles2";
 
     if (!strncmp("opengles", renderer, 8))
     {
@@ -133,6 +133,7 @@ int pojavInitOpenGL() {
     if (!strcmp(renderer, "custom_gallium"))
     {
         pojav_environ->config_renderer = RENDERER_VK_ZINK;
+        load_vulkan();
         set_osm_bridge_tbl();
     }
 
@@ -223,6 +224,14 @@ EXTERNAL_API void pojavSwapBuffers() {
 }
 
 EXTERNAL_API void pojavMakeCurrent(void* window) {
+    static __thread bool s_render_thread_pinned = false;
+    if (window != NULL && !s_render_thread_pinned) {
+        s_render_thread_pinned = true;
+        if (getenv("POJAV_BIG_CORE_AFFINITY") != NULL) {
+            bigcore_set_affinity();
+        }
+    }
+
     if (pojav_environ->config_renderer == RENDERER_VK_ZINK
      || pojav_environ->config_renderer == RENDERER_GL4ES)
     {

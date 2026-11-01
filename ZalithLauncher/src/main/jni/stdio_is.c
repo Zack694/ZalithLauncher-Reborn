@@ -32,7 +32,6 @@ static bool recordBuffer(char* buf, ssize_t len) {
     if (latestlog_fd != -1)
     {
         write(latestlog_fd, buf, len);
-        fdatasync(latestlog_fd);
     }
     return true;
 }
@@ -49,12 +48,13 @@ static void *logger_thread() {
 
     while ((rsize = read(pfd[0], buf, sizeof(buf)-1)) > 0)
     {
-        bool shouldRecordString = recordBuffer(buf, rsize); //record with newline int latestlog
-        if (buf[rsize-1]=='\n')
+        buf[rsize] = 0x00;
+        bool shouldRecordString = recordBuffer(buf, rsize); //record with newline in latestlog
+        if (rsize > 0 && buf[rsize-1]=='\n')
         {
             rsize=rsize-1; //truncate
+            buf[rsize]=0x00;
         }
-        buf[rsize]=0x00;
         if (shouldRecordString && logListener != NULL)
         {
             writeString = (*env)->NewStringUTF(env, buf); //send to app without newline

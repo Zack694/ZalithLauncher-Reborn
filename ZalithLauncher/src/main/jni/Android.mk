@@ -16,7 +16,8 @@ include $(CLEAR_VARS)
 LOCAL_LDLIBS := -ldl -llog -landroid
 LOCAL_MODULE := pojavexec
 LOCAL_SHARED_LIBRARIES := driver_helper
-LOCAL_CFLAGS += -rdynamic
+LOCAL_CFLAGS += -O3 -ffast-math -fomit-frame-pointer -flto=thin -rdynamic
+LOCAL_LDFLAGS += -flto=thin
 LOCAL_SRC_FILES := \
     bigcoreaffinity.c \
     egl_bridge.c \
@@ -101,7 +102,8 @@ LOCAL_SRC_FILES := \
     recordzydsp/rnnoise/pitch.c \
     recordzydsp/rnnoise/rnn.c \
     recordzydsp/rnnoise/rnn_data.c
-LOCAL_CFLAGS += -O2
+LOCAL_CFLAGS += -O3 -ffast-math -fomit-frame-pointer -flto=thin
+LOCAL_LDFLAGS += -flto=thin
 include $(BUILD_SHARED_LIBRARY)
 
 

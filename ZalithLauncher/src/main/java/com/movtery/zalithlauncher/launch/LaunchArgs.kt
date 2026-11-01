@@ -112,7 +112,11 @@ class LaunchArgs(
             }
         }
 
-        args.addAll(getCacioJavaArgs(runtime.javaVersion == 8))
+        if (runtime.javaVersion == 8) {
+            args.addAll(getCacioJavaArgs(true))
+        } else {
+            args.add("-Djava.awt.headless=true")
+        }
 
         val isLegacyLog4j =
             VersionNumber.compare(VersionNumber.asVersion(versionInfo.id ?: "0.0").canonical, "1.12") < 0
@@ -184,7 +188,13 @@ class LaunchArgs(
     }
 
     private fun getLwjglNativeDir(lwjglComponent: String): File {
-        return File(PathManager.DIR_FILE, "$lwjglComponent/natives/arm64-v8a")
+        val abi = when (Tools.DEVICE_ARCHITECTURE) {
+            net.kdt.pojavlaunch.Architecture.ARCH_ARM -> "armeabi-v7a"
+            net.kdt.pojavlaunch.Architecture.ARCH_X86 -> "x86"
+            net.kdt.pojavlaunch.Architecture.ARCH_X86_64 -> "x86_64"
+            else -> "arm64-v8a"
+        }
+        return File(PathManager.DIR_FILE, "$lwjglComponent/natives/$abi")
     }
 
     private fun getVersionSpecificNativesDir(): File {

@@ -17,7 +17,20 @@ constexpr size_t kCapFrames = 48000u * 2u;
 constexpr uint64_t kLagFrames = 1200u;
 constexpr int kMaxDevices = 8;
 
-std::mutex g_mtx;
+struct SpinLock {
+    std::atomic_flag flag = ATOMIC_FLAG_INIT;
+    void lock() noexcept {
+        while (flag.test_and_set(std::memory_order_acquire)) {
+#if defined(__aarch64__) || defined(__arm__)
+            __asm__ __volatile__("yield" ::: "memory");
+#endif
+        }
+    }
+    void unlock() noexcept {
+        flag.clear(std::memory_order_release);
+    }
+};
+SpinLock g_mtx;
 
 // Accumulator ring (interleaved int32 per channel) for summing all devices on a
 // shared timeline; cleared as it's read.
@@ -46,7 +59,7 @@ inline int16_t floatToS16(float f) {
 extern "C" {
 
 RZ_EXPORT void recordzy_tap_set_active(int active) {
-    std::lock_guard<std::mutex> lk(g_mtx);
+    std::lock_guard<SpinLock> lk(g_mtx);
     if (active) {
         g_readPos = 0;
         g_frontier = 0;
@@ -89,7 +102,7 @@ RZ_EXPORT void recordzy_tap_feed(const void *dev, const void *pcm, unsigned numS
     }
     unsigned ch = frameStep ? frameStep : 2u;
 
-    std::lock_guard<std::mutex> lk(g_mtx);
+    std::lock_guard<SpinLock> lk(g_mtx);
     g_rate.store(static_cast<int>(freq), std::memory_order_relaxed);
 
     if (g_acc == nullptr) {
@@ -134,7 +147,7 @@ RZ_EXPORT void recordzy_tap_feed(const void *dev, const void *pcm, unsigned numS
 
 RZ_EXPORT int recordzy_tap_read(short *out, int maxSamples) {
     if (out == nullptr || maxSamples <= 0) return 0;
-    std::lock_guard<std::mutex> lk(g_mtx);
+    std::lock_guard<SpinLock> lk(g_mtx);
     if (g_acc == nullptr || g_ch <= 0) return 0;
 
     uint64_t ready = (g_frontier > g_readPos + kLagFrames)
@@ -167,7 +180,7 @@ RZ_EXPORT int recordzy_tap_channels(void) {
 }
 
 RZ_EXPORT int recordzy_tap_device_count(void) {
-    std::lock_guard<std::mutex> lk(g_mtx);
+    std::lock_guard<SpinLock> lk(g_mtx);
     return g_devN;
 }
 

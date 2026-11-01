@@ -1,0 +1,551 @@
+--- a/ZalithLauncher/src/main/jni/Application.mk
++++ b/ZalithLauncher/src/main/jni/Application.mk
+@@ -1,4 +1,4 @@
+ # NDK_TOOLCHAIN_VERSION := 4.9
+-APP_PLATFORM := android-21
++APP_PLATFORM := android-26
+ APP_STL := system
+ # APP_ABI := armeabi-v7a arm64-v8a x86 x86_64
+--- a/ZalithLauncher/src/main/jni/Android.mk
++++ b/ZalithLauncher/src/main/jni/Android.mk
+@@ -16,7 +16,8 @@
+ LOCAL_LDLIBS := -ldl -llog -landroid
+ LOCAL_MODULE := pojavexec
+ LOCAL_SHARED_LIBRARIES := driver_helper
+-LOCAL_CFLAGS += -rdynamic
++LOCAL_CFLAGS += -O3 -ffast-math -fomit-frame-pointer -flto=thin -rdynamic
++LOCAL_LDFLAGS += -flto=thin
+ LOCAL_SRC_FILES := \
+     bigcoreaffinity.c \
+     egl_bridge.c \
+@@ -101,7 +102,8 @@
+     recordzydsp/rnnoise/pitch.c \
+     recordzydsp/rnnoise/rnn.c \
+     recordzydsp/rnnoise/rnn_data.c
+-LOCAL_CFLAGS += -O2
++LOCAL_CFLAGS += -O3 -ffast-math -fomit-frame-pointer -flto=thin
++LOCAL_LDFLAGS += -flto=thin
+ include $(BUILD_SHARED_LIBRARY)
+ 
+ 
+--- a/ZalithLauncher/src/main/jni/bigcoreaffinity.c
++++ b/ZalithLauncher/src/main/jni/bigcoreaffinity.c
+@@ -13,43 +13,68 @@
+ #include <string.h>
+ 
+ #define FREQ_MAX 256
++#define MAX_CORES 16
++
+ void bigcore_format_cpu_path(char* buffer, unsigned int cpu_core) {
+-    snprintf(buffer, PATH_MAX, "/sys/devices/system/cpu/cpu%i/cpufreq/cpuinfo_max_freq", cpu_core);
++    snprintf(buffer, PATH_MAX, "/sys/devices/system/cpu/cpu%u/cpufreq/cpuinfo_max_freq", cpu_core);
+ }
+ 
+ void bigcore_set_affinity() {
+     char path_buffer[PATH_MAX];
+     char freq_buffer[FREQ_MAX];
+     char* discard;
+-    unsigned long core_freq;
++    unsigned long core_freqs[MAX_CORES];
+     unsigned long max_freq = 0;
++    unsigned long min_freq = ~0UL;
+     unsigned int corecnt = 0;
+-    unsigned int big_core_id = 0;
+-    while(1) {
++
++    while (corecnt < MAX_CORES) {
+         bigcore_format_cpu_path(path_buffer, corecnt);
+         int corefreqfd = open(path_buffer, O_RDONLY);
+-        if(corefreqfd != -1) {
+-            ssize_t read_count = read(corefreqfd, freq_buffer, FREQ_MAX);
++        if (corefreqfd != -1) {
++            ssize_t read_count = read(corefreqfd, freq_buffer, FREQ_MAX - 1);
+             close(corefreqfd);
+-            freq_buffer[read_count] = 0;
+-            core_freq = strtoul(freq_buffer, &discard, 10);
+-            if(core_freq >= max_freq) {
+-                max_freq = core_freq;
+-                big_core_id = corecnt;
++            if (read_count > 0) {
++                freq_buffer[read_count] = 0;
++                unsigned long freq = strtoul(freq_buffer, &discard, 10);
++                core_freqs[corecnt] = freq;
++                if (freq > max_freq) max_freq = freq;
++                if (freq > 0 && freq < min_freq) min_freq = freq;
++                corecnt++;
++                continue;
+             }
+-        }else{
+-            break;
+         }
+-        corecnt++;
++        break;
++    }
++
++    if (corecnt == 0) {
++        return;
+     }
+-    printf("bigcore: big CPU number is %u, frequency %lu Hz\n", big_core_id, max_freq);
++
+     cpu_set_t bigcore_affinity_set;
+     CPU_ZERO(&bigcore_affinity_set);
+-    CPU_SET_S(big_core_id, CPU_SETSIZE, &bigcore_affinity_set);
++    unsigned int pinned_count = 0;
++
++    // On big.LITTLE SoCs (max_freq > min_freq), include ALL performance + prime cores
++    // (every core faster than the LITTLE efficiency cluster) so the Render thread and its
++    // driver workers aren't bottlenecked onto a single core.
++    for (unsigned int i = 0; i < corecnt; i++) {
++        if (max_freq > min_freq) {
++            if (core_freqs[i] > min_freq) {
++                CPU_SET_S(i, CPU_SETSIZE, &bigcore_affinity_set);
++                pinned_count++;
++            }
++        } else {
++            CPU_SET_S(i, CPU_SETSIZE, &bigcore_affinity_set);
++            pinned_count++;
++        }
++    }
++
+     int result = sched_setaffinity(0, CPU_SETSIZE, &bigcore_affinity_set);
+-    if(result != 0) {
++    if (result != 0) {
+         printf("bigcore: setting affinity failed: %s\n", strerror(result));
+-    }else{
+-        printf("bigcore: forced current thread onto big core\n");
++    } else {
++        printf("bigcore: pinned current thread (TID %d) across %u performance core(s) (max %lu KHz)\n",
++               gettid(), pinned_count, max_freq);
+     }
+-}
+\ No newline at end of file
++}
+--- a/ZalithLauncher/src/main/jni/egl_bridge.c
++++ b/ZalithLauncher/src/main/jni/egl_bridge.c
+@@ -47,6 +47,7 @@
+ 
+ void* loadTurnipVulkan();
+ void calculateFPS();
++void bigcore_set_affinity();
+ 
+ EXTERNAL_API void pojavTerminate() {
+     printf("EGLBridge: Terminating\n");
+@@ -117,12 +118,11 @@
+ 
+ int pojavInitOpenGL() {
+     const char *forceVsync = getenv("FORCE_VSYNC");
+-    if (!strcmp(forceVsync, "true"))
++    if (forceVsync != NULL && !strcmp(forceVsync, "true"))
+         pojav_environ->force_vsync = true;
+ 
+     const char *renderer = getenv("POJAV_RENDERER");
+-
+-    load_vulkan();
++    if (renderer == NULL) renderer = "opengles2";
+ 
+     if (!strncmp("opengles", renderer, 8))
+     {
+@@ -133,6 +133,7 @@
+     if (!strcmp(renderer, "custom_gallium"))
+     {
+         pojav_environ->config_renderer = RENDERER_VK_ZINK;
++        load_vulkan();
+         set_osm_bridge_tbl();
+     }
+ 
+@@ -223,6 +224,14 @@
+ }
+ 
+ EXTERNAL_API void pojavMakeCurrent(void* window) {
++    static __thread bool s_render_thread_pinned = false;
++    if (window != NULL && !s_render_thread_pinned) {
++        s_render_thread_pinned = true;
++        if (getenv("POJAV_BIG_CORE_AFFINITY") != NULL) {
++            bigcore_set_affinity();
++        }
++    }
++
+     if (pojav_environ->config_renderer == RENDERER_VK_ZINK
+      || pojav_environ->config_renderer == RENDERER_GL4ES)
+     {
+--- a/ZalithLauncher/src/main/jni/input_bridge_v3.c
++++ b/ZalithLauncher/src/main/jni/input_bridge_v3.c
+@@ -98,8 +98,8 @@
+ 
+ void pojavPumpEvents(void* window) {
+     if(pojav_environ->shouldUpdateMouse) {
+-        pojav_environ->GLFW_invoke_CursorPos(window, floor(pojav_environ->cursorX),
+-                                             floor(pojav_environ->cursorY));
++        pojav_environ->GLFW_invoke_CursorPos(window, pojav_environ->cursorX,
++                                             pojav_environ->cursorY);
+     }
+ 
+     size_t index = pojav_environ->outEventIndex;
+@@ -520,7 +520,6 @@
+ const static JNINativeMethod critical_fcns[] = {
+         {"nativeSetUseInputStackQueue", "(Z)V", critical_set_stackqueue},
+         {"nativeSetCursorShape", "(I)V", critical_set_cursor_shape},
+-        {"nativeSetCursorShape", "(I)V", noncritical_set_cursor_shape},
+         {"nativeSendChar", "(C)Z", critical_send_char},
+         {"nativeSendCharMods", "(CI)Z", critical_send_char_mods},
+         {"nativeSendKey", "(IIII)V", critical_send_key},
+--- a/ZalithLauncher/src/main/jni/stdio_is.c
++++ b/ZalithLauncher/src/main/jni/stdio_is.c
+@@ -32,7 +32,6 @@
+     if (latestlog_fd != -1)
+     {
+         write(latestlog_fd, buf, len);
+-        fdatasync(latestlog_fd);
+     }
+     return true;
+ }
+@@ -49,12 +48,13 @@
+ 
+     while ((rsize = read(pfd[0], buf, sizeof(buf)-1)) > 0)
+     {
+-        bool shouldRecordString = recordBuffer(buf, rsize); //record with newline int latestlog
+-        if (buf[rsize-1]=='\n')
++        buf[rsize] = 0x00;
++        bool shouldRecordString = recordBuffer(buf, rsize); //record with newline in latestlog
++        if (rsize > 0 && buf[rsize-1]=='\n')
+         {
+             rsize=rsize-1; //truncate
++            buf[rsize]=0x00;
+         }
+-        buf[rsize]=0x00;
+         if (shouldRecordString && logListener != NULL)
+         {
+             writeString = (*env)->NewStringUTF(env, buf); //send to app without newline
+--- a/ZalithLauncher/src/main/jni/ctxbridges/gl_bridge.c
++++ b/ZalithLauncher/src/main/jni/ctxbridges/gl_bridge.c
+@@ -61,7 +61,7 @@
+     EGLint egl_attributes[] = { EGL_BLUE_SIZE, 8,
+                     EGL_GREEN_SIZE, 8,
+                     EGL_RED_SIZE, 8,
+-                    EGL_ALPHA_SIZE, 8,
++                    EGL_ALPHA_SIZE, 0,
+                     EGL_DEPTH_SIZE, 24,
+                     EGL_SURFACE_TYPE,
+                     EGL_WINDOW_BIT|EGL_PBUFFER_BIT,
+@@ -104,10 +104,19 @@
+         if (!bindResult) printf("EGLBridge: bind failed: %p\n", eglGetError_p());
+     }
+ 
+-    int libgl_es = strtol(getenv("LIBGL_ES"), NULL, 0);
+-    if (libgl_es < 0 || libgl_es > INT16_MAX) libgl_es = 2;
++    const char* libgl_es_str = getenv("LIBGL_ES");
++    int libgl_es = libgl_es_str != NULL ? strtol(libgl_es_str, NULL, 0) : 2;
++    if (libgl_es <= 0 || libgl_es > INT16_MAX) libgl_es = 2;
++    const EGLint egl_noerror_context_attributes[] = {
++        EGL_CONTEXT_CLIENT_VERSION, libgl_es,
++        0x31B3 /* EGL_CONTEXT_OPENGL_NO_ERROR_KHR */, EGL_TRUE,
++        EGL_NONE
++    };
+     const EGLint egl_context_attributes[] = { EGL_CONTEXT_CLIENT_VERSION, libgl_es, EGL_NONE };
+-    bundle->context = eglCreateContext_p(g_EglDisplay, bundle->config, share == NULL ? EGL_NO_CONTEXT : share->context, egl_context_attributes);
++    bundle->context = eglCreateContext_p(g_EglDisplay, bundle->config, share == NULL ? EGL_NO_CONTEXT : share->context, egl_noerror_context_attributes);
++    if (bundle->context == EGL_NO_CONTEXT) {
++        bundle->context = eglCreateContext_p(g_EglDisplay, bundle->config, share == NULL ? EGL_NO_CONTEXT : share->context, egl_context_attributes);
++    }
+ 
+     if (bundle->context == EGL_NO_CONTEXT)
+     {
+--- a/ZalithLauncher/src/main/jni/ctxbridges/virgl_bridge.c
++++ b/ZalithLauncher/src/main/jni/ctxbridges/virgl_bridge.c
+@@ -90,7 +90,7 @@
+             EGL_RED_SIZE, 8,
+             EGL_GREEN_SIZE, 8,
+             EGL_BLUE_SIZE, 8,
+-            EGL_ALPHA_SIZE, 8,
++            EGL_ALPHA_SIZE, 0,
+             // Minecraft required on initial 24
+             EGL_DEPTH_SIZE, 24,
+             EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+--- a/ZalithLauncher/src/main/jni/driver_helper/driver_helper.c
++++ b/ZalithLauncher/src/main/jni/driver_helper/driver_helper.c
+@@ -26,7 +26,6 @@
+ 
+     EGLint num_configs = 0;
+     if (eglChooseConfig(eglDisplay, egl_attributes, NULL, 0, &num_configs) != EGL_TRUE || num_configs == 0) {
+-        eglTerminate(eglDisplay);
+         return false;
+     }
+ 
+@@ -36,13 +35,11 @@
+     const EGLint egl_context_attributes[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
+     EGLContext context = eglCreateContext(eglDisplay, eglConfig, EGL_NO_CONTEXT, egl_context_attributes);
+     if (context == EGL_NO_CONTEXT) {
+-        eglTerminate(eglDisplay);
+         return false;
+     }
+ 
+     if (eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, context) != EGL_TRUE) {
+         eglDestroyContext(eglDisplay, context);
+-        eglTerminate(eglDisplay);
+         return false;
+     }
+ 
+@@ -53,7 +50,7 @@
+ 
+     eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+     eglDestroyContext(eglDisplay, context);
+-    eglTerminate(eglDisplay);
++    // Do not call eglTerminate(eglDisplay) on EGL_DEFAULT_DISPLAY as it is shared process-wide.
+ 
+     return is_adreno;
+ }
+--- a/ZalithLauncher/src/main/java/net/kdt/pojavlaunch/utils/JREUtils.java
++++ b/ZalithLauncher/src/main/java/net/kdt/pojavlaunch/utils/JREUtils.java
+@@ -462,8 +462,28 @@
+ 
+     private static void addLauncherManagedJvmArgs(List<String> userArgs) {
+         userArgs.add("-javaagent:" + LibPath.MIO_LIB_PATCHER.getAbsolutePath());
+-        userArgs.add("-Xms" + AllSettings.getRamAllocation().getValue().getValue() + "M");
+-        userArgs.add("-Xmx" + AllSettings.getRamAllocation().getValue().getValue() + "M");
++        int ramMb = AllSettings.getRamAllocation().getValue().getValue();
++        int initRamMb = Math.min(512, ramMb);
++        userArgs.add("-Xms" + initRamMb + "M");
++        userArgs.add("-Xmx" + ramMb + "M");
++
++        boolean hasCustomGc = false;
++        for (String arg : userArgs) {
++            if (arg.startsWith("-XX:+Use") && arg.endsWith("GC")) {
++                hasCustomGc = true;
++                break;
++            }
++        }
++        if (!hasCustomGc) {
++            userArgs.add("-XX:+UnlockExperimentalVMOptions");
++            userArgs.add("-XX:+UseG1GC");
++            userArgs.add("-XX:+ParallelRefProcEnabled");
++            userArgs.add("-XX:MaxGCPauseMillis=30");
++            userArgs.add("-XX:+DisableExplicitGC");
++            userArgs.add("-XX:G1NewSizePercent=20");
++            userArgs.add("-XX:G1ReservePercent=15");
++            userArgs.add("-XX:G1HeapRegionSize=8M");
++        }
+ 
+         if (Renderers.INSTANCE.isCurrentRendererValid()) {
+             userArgs.add("-Dorg.lwjgl.opengl.libname=" + loadGraphicsLibrary());
+@@ -749,7 +769,7 @@
+ 
+             return highestEsVersion;
+         } finally {
+-            egl.eglTerminate(display);
++            // Do not call eglTerminate on EGL_DEFAULT_DISPLAY because it is shared process-wide.
+         }
+     }
+ 
+--- a/ZalithLauncher/src/main/java/com/movtery/zalithlauncher/launch/LaunchArgs.kt
++++ b/ZalithLauncher/src/main/java/com/movtery/zalithlauncher/launch/LaunchArgs.kt
+@@ -112,7 +112,11 @@
+             }
+         }
+ 
+-        args.addAll(getCacioJavaArgs(runtime.javaVersion == 8))
++        if (runtime.javaVersion == 8) {
++            args.addAll(getCacioJavaArgs(true))
++        } else {
++            args.add("-Djava.awt.headless=true")
++        }
+ 
+         val isLegacyLog4j =
+             VersionNumber.compare(VersionNumber.asVersion(versionInfo.id ?: "0.0").canonical, "1.12") < 0
+@@ -184,7 +188,13 @@
+     }
+ 
+     private fun getLwjglNativeDir(lwjglComponent: String): File {
+-        return File(PathManager.DIR_FILE, "$lwjglComponent/natives/arm64-v8a")
++        val abi = when (Tools.DEVICE_ARCHITECTURE) {
++            net.kdt.pojavlaunch.Architecture.ARCH_ARM -> "armeabi-v7a"
++            net.kdt.pojavlaunch.Architecture.ARCH_X86 -> "x86"
++            net.kdt.pojavlaunch.Architecture.ARCH_X86_64 -> "x86_64"
++            else -> "arm64-v8a"
++        }
++        return File(PathManager.DIR_FILE, "$lwjglComponent/natives/$abi")
+     }
+ 
+     private fun getVersionSpecificNativesDir(): File {
+--- a/ZalithLauncher/src/main/java/com/movtery/zalithlauncher/launch/LaunchGame.kt
++++ b/ZalithLauncher/src/main/java/com/movtery/zalithlauncher/launch/LaunchGame.kt
+@@ -245,7 +245,9 @@
+                 }
+             }
+ 
+-            JREUtils.redirectAndPrintJRELog()
++            if (AllSettings.enableLogOutput.getValue()) {
++                JREUtils.redirectAndPrintJRELog()
++            }
+             launchJvm(activity, account, minecraftVersion, javaRuntime, customArgs)
+             // ModInj bridge: JVM returned -> clean exit; tell ModInj to wipe the
+             // selected files. Crash exits never reach this line; ModInj instead
+--- a/ZalithLauncher/src/main/java/com/movtery/zalithlauncher/setting/AllSettings.kt
++++ b/ZalithLauncher/src/main/java/com/movtery/zalithlauncher/setting/AllSettings.kt
+@@ -195,7 +195,7 @@
+         val dumpShaders = BooleanSettingUnit("dump_shaders", false)
+ 
+         @JvmStatic
+-        val bigCoreAffinity = BooleanSettingUnit("bigCoreAffinity", false)
++        val bigCoreAffinity = BooleanSettingUnit("bigCoreAffinity", true)
+ 
+         @JvmStatic
+         val tcVibrateDuration = IntSettingUnit("tcVibrateDuration", 100)
+--- a/ZalithLauncher/src/main/java/com/movtery/zalithlauncher/recorder/GameRecorder.java
++++ b/ZalithLauncher/src/main/java/com/movtery/zalithlauncher/recorder/GameRecorder.java
+@@ -691,7 +691,7 @@
+ 
+                     int drop = (int) Math.floor(pos);
+                     if (drop > pendFrames) drop = pendFrames;
+-                    if (drop > 0) {
++                    if (drop >= 4096 || (drop > 0 && (pendFrames + 2048) * ch > pend.length)) {
+                         System.arraycopy(pend, drop * ch, pend, 0, (pendFrames - drop) * ch);
+                         pendFrames -= drop;
+                         pos -= drop;
+--- a/ZalithLauncher/src/main/java/com/movtery/zalithlauncher/modsync/ModSyncBridge.kt
++++ b/ZalithLauncher/src/main/java/com/movtery/zalithlauncher/modsync/ModSyncBridge.kt
+@@ -4,6 +4,8 @@
+ import android.content.BroadcastReceiver
+ import android.content.Context
+ import android.content.Intent
++import android.os.Handler
++import android.os.HandlerThread
+ import com.movtery.zalithlauncher.feature.customprofilepath.ProfilePathManager
+ import com.movtery.zalithlauncher.feature.log.Logging
+ import java.io.File
+@@ -57,17 +59,21 @@
+ 
+         Logging.i(TAG, "Opening ModInj injection window for '$instanceName'")
+ 
+-        activity.sendOrderedBroadcast(
+-            intent,
+-            ModSyncContract.PERMISSION,
+-            receiver,
+-            null,
+-            Activity.RESULT_OK,
+-            null,
+-            null
+-        )
+-
+-        val injected = latch.await(INJECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
++        val callbackThread = HandlerThread("ModSync-Callback").apply { start() }
++        val injected = try {
++            activity.sendOrderedBroadcast(
++                intent,
++                ModSyncContract.PERMISSION,
++                receiver,
++                Handler(callbackThread.looper),
++                Activity.RESULT_OK,
++                null,
++                null
++            )
++            latch.await(INJECTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
++        } finally {
++            callbackThread.quitSafely()
++        }
+         Logging.i(
+             TAG,
+             if (injected) "Injection window closed (ModInj responded)"
+--- a/jre_lwjgl3glfw/src/main/java/org/lwjgl/glfw/GLFW.java
++++ b/jre_lwjgl3glfw/src/main/java/org/lwjgl/glfw/GLFW.java
+@@ -1195,16 +1195,12 @@
+     public static void glfwWaitEvents() {}
+ 
+     public static void glfwWaitEventsTimeout(double timeout) {
+-        // Boardwalk: this isn't how you do a frame limiter, but oh well
+-        // System.out.println("Frame limiter");
+-    /*
+-        try {
+-            Thread.sleep((long)(timeout * 1000));
+-        } catch (InterruptedException ie) {
++        if (timeout > 0.0) {
++            long nanos = (long) (Math.min(timeout, 0.25) * 1_000_000_000.0);
++            if (nanos > 0L) {
++                java.util.concurrent.locks.LockSupport.parkNanos(nanos);
++            }
+         }
+-    */
+-        // System.out.println("Out of the frame limiter");
+-
+     }
+ 
+     public static void glfwPostEmptyEvent() {}
+--- a/ZalithLauncher/src/main/java/net/kdt/pojavlaunch/MinecraftGLSurface.java
++++ b/ZalithLauncher/src/main/java/net/kdt/pojavlaunch/MinecraftGLSurface.java
+@@ -128,12 +128,17 @@
+         mInGUIProcessor.setAbstractTouchpad(touchpad);
+         if(AllSettings.getAlternateSurface().getValue()){
+             SurfaceView surfaceView = new SurfaceView(getContext());
++            surfaceView.getHolder().setFormat(android.graphics.PixelFormat.RGBX_8888);
+             mSurface = surfaceView;
+ 
+             surfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
+                 private boolean isCalled = isAlreadyRunning;
+                 @Override
+                 public void surfaceCreated(@NonNull SurfaceHolder holder) {
++                    if (!mIsRenderingStarted) {
++                        mIsRenderingStarted = true;
++                        if (mOnRenderingStartedListener != null) mOnRenderingStartedListener.isStarted();
++                    }
+                     if(isCalled) {
+                         JREUtils.setupBridgeWindow(bridgeSurface(surfaceView.getHolder().getSurface()));
+                         return;
+--- a/openal-tap/recordzy_tap.cpp
++++ b/openal-tap/recordzy_tap.cpp
+@@ -17,7 +17,20 @@
+ constexpr uint64_t kLagFrames = 1200u;
+ constexpr int kMaxDevices = 8;
+ 
+-std::mutex g_mtx;
++struct SpinLock {
++    std::atomic_flag flag = ATOMIC_FLAG_INIT;
++    void lock() noexcept {
++        while (flag.test_and_set(std::memory_order_acquire)) {
++#if defined(__aarch64__) || defined(__arm__)
++            __asm__ __volatile__("yield" ::: "memory");
++#endif
++        }
++    }
++    void unlock() noexcept {
++        flag.clear(std::memory_order_release);
++    }
++};
++SpinLock g_mtx;
+ 
+ // Accumulator ring (interleaved int32 per channel) for summing all devices on a
+ // shared timeline; cleared as it's read.
+@@ -46,7 +59,7 @@
+ extern "C" {
+ 
+ RZ_EXPORT void recordzy_tap_set_active(int active) {
+-    std::lock_guard<std::mutex> lk(g_mtx);
++    std::lock_guard<SpinLock> lk(g_mtx);
+     if (active) {
+         g_readPos = 0;
+         g_frontier = 0;
+@@ -89,7 +102,7 @@
+     }
+     unsigned ch = frameStep ? frameStep : 2u;
+ 
+-    std::lock_guard<std::mutex> lk(g_mtx);
++    std::lock_guard<SpinLock> lk(g_mtx);
+     g_rate.store(static_cast<int>(freq), std::memory_order_relaxed);
+ 
+     if (g_acc == nullptr) {
+@@ -134,7 +147,7 @@
+ 
+ RZ_EXPORT int recordzy_tap_read(short *out, int maxSamples) {
+     if (out == nullptr || maxSamples <= 0) return 0;
+-    std::lock_guard<std::mutex> lk(g_mtx);
++    std::lock_guard<SpinLock> lk(g_mtx);
+     if (g_acc == nullptr || g_ch <= 0) return 0;
+ 
+     uint64_t ready = (g_frontier > g_readPos + kLagFrames)
+@@ -167,7 +180,7 @@
+ }
+ 
+ RZ_EXPORT int recordzy_tap_device_count(void) {
+-    std::lock_guard<std::mutex> lk(g_mtx);
++    std::lock_guard<SpinLock> lk(g_mtx);
+     return g_devN;
+ }
+ 

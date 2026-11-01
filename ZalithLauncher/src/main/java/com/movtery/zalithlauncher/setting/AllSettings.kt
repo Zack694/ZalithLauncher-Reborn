@@ -195,7 +195,7 @@ class AllSettings {
         val dumpShaders = BooleanSettingUnit("dump_shaders", false)
 
         @JvmStatic
-        val bigCoreAffinity = BooleanSettingUnit("bigCoreAffinity", false)
+        val bigCoreAffinity = BooleanSettingUnit("bigCoreAffinity", true)
 
         @JvmStatic
         val tcVibrateDuration = IntSettingUnit("tcVibrateDuration", 100)

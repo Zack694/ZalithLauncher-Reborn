@@ -90,7 +90,7 @@ int virglInit() {
             EGL_RED_SIZE, 8,
             EGL_GREEN_SIZE, 8,
             EGL_BLUE_SIZE, 8,
-            EGL_ALPHA_SIZE, 8,
+            EGL_ALPHA_SIZE, 0,
             // Minecraft required on initial 24
             EGL_DEPTH_SIZE, 24,
             EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,

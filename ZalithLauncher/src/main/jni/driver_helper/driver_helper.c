@@ -26,7 +26,6 @@ bool checkAdrenoGraphics() {
 
     EGLint num_configs = 0;
     if (eglChooseConfig(eglDisplay, egl_attributes, NULL, 0, &num_configs) != EGL_TRUE || num_configs == 0) {
-        eglTerminate(eglDisplay);
         return false;
     }
 
@@ -36,13 +35,11 @@ bool checkAdrenoGraphics() {
     const EGLint egl_context_attributes[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
     EGLContext context = eglCreateContext(eglDisplay, eglConfig, EGL_NO_CONTEXT, egl_context_attributes);
     if (context == EGL_NO_CONTEXT) {
-        eglTerminate(eglDisplay);
         return false;
     }
 
     if (eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, context) != EGL_TRUE) {
         eglDestroyContext(eglDisplay, context);
-        eglTerminate(eglDisplay);
         return false;
     }
 
@@ -53,7 +50,7 @@ bool checkAdrenoGraphics() {
 
     eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     eglDestroyContext(eglDisplay, context);
-    eglTerminate(eglDisplay);
+    // Do not call eglTerminate(eglDisplay) on EGL_DEFAULT_DISPLAY as it is shared process-wide.
 
     return is_adreno;
 }

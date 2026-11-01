@@ -16,7 +16,11 @@ include $(CLEAR_VARS)
 LOCAL_LDLIBS := -ldl -llog -landroid
 LOCAL_MODULE := pojavexec
 LOCAL_SHARED_LIBRARIES := driver_helper
-LOCAL_CFLAGS += -rdynamic
+# NOTE: -ffast-math is NOT safe here: the recordzydsp module vendors libopus
+# sources (rnnoise) that refuse to build with it (arch.h FLOAT_APPROX guard),
+# and it changes float rounding in the input/coordinate paths.
+LOCAL_CFLAGS += -O3 -fomit-frame-pointer -flto=thin -rdynamic
+LOCAL_LDFLAGS += -flto=thin
 LOCAL_SRC_FILES := \
     bigcoreaffinity.c \
     egl_bridge.c \
@@ -101,7 +105,9 @@ LOCAL_SRC_FILES := \
     recordzydsp/rnnoise/pitch.c \
     recordzydsp/rnnoise/rnn.c \
     recordzydsp/rnnoise/rnn_data.c
-LOCAL_CFLAGS += -O2
+# -ffast-math omitted: vendored libopus (rnnoise) refuses it (arch.h guard)
+LOCAL_CFLAGS += -O3 -fomit-frame-pointer -flto=thin
+LOCAL_LDFLAGS += -flto=thin
 include $(BUILD_SHARED_LIBRARY)
 
 

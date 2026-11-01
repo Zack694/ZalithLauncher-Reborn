@@ -462,8 +462,28 @@ public final class JREUtils {
 
     private static void addLauncherManagedJvmArgs(List<String> userArgs) {
         userArgs.add("-javaagent:" + LibPath.MIO_LIB_PATCHER.getAbsolutePath());
-        userArgs.add("-Xms" + AllSettings.getRamAllocation().getValue().getValue() + "M");
-        userArgs.add("-Xmx" + AllSettings.getRamAllocation().getValue().getValue() + "M");
+        int ramMb = AllSettings.getRamAllocation().getValue().getValue();
+        int initRamMb = Math.min(512, ramMb);
+        userArgs.add("-Xms" + initRamMb + "M");
+        userArgs.add("-Xmx" + ramMb + "M");
+
+        boolean hasCustomGc = false;
+        for (String arg : userArgs) {
+            if (arg.startsWith("-XX:+Use") && arg.endsWith("GC")) {
+                hasCustomGc = true;
+                break;
+            }
+        }
+        if (!hasCustomGc) {
+            userArgs.add("-XX:+UnlockExperimentalVMOptions");
+            userArgs.add("-XX:+UseG1GC");
+            userArgs.add("-XX:+ParallelRefProcEnabled");
+            userArgs.add("-XX:MaxGCPauseMillis=30");
+            userArgs.add("-XX:+DisableExplicitGC");
+            userArgs.add("-XX:G1NewSizePercent=20");
+            userArgs.add("-XX:G1ReservePercent=15");
+            userArgs.add("-XX:G1HeapRegionSize=8M");
+        }
 
         if (Renderers.INSTANCE.isCurrentRendererValid()) {
             userArgs.add("-Dorg.lwjgl.opengl.libname=" + loadGraphicsLibrary());
@@ -749,7 +769,7 @@ public final class JREUtils {
 
             return highestEsVersion;
         } finally {
-            egl.eglTerminate(display);
+            // Do not call eglTerminate on EGL_DEFAULT_DISPLAY because it is shared process-wide.
         }
     }
 

@@ -98,8 +98,8 @@ void handleFramebufferSizeJava(long window, int w, int h) {
 
 void pojavPumpEvents(void* window) {
     if(pojav_environ->shouldUpdateMouse) {
-        pojav_environ->GLFW_invoke_CursorPos(window, floor(pojav_environ->cursorX),
-                                             floor(pojav_environ->cursorY));
+        pojav_environ->GLFW_invoke_CursorPos(window, pojav_environ->cursorX,
+                                             pojav_environ->cursorY);
     }
 
     size_t index = pojav_environ->outEventIndex;
@@ -520,7 +520,6 @@ JNIEXPORT void JNICALL Java_org_lwjgl_glfw_CallbackBridge_nativeSetWindowAttrib(
 const static JNINativeMethod critical_fcns[] = {
         {"nativeSetUseInputStackQueue", "(Z)V", critical_set_stackqueue},
         {"nativeSetCursorShape", "(I)V", critical_set_cursor_shape},
-        {"nativeSetCursorShape", "(I)V", noncritical_set_cursor_shape},
         {"nativeSendChar", "(C)Z", critical_send_char},
         {"nativeSendCharMods", "(CI)Z", critical_send_char_mods},
         {"nativeSendKey", "(IIII)V", critical_send_key},

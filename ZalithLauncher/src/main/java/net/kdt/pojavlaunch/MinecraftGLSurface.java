@@ -128,12 +128,17 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
         mInGUIProcessor.setAbstractTouchpad(touchpad);
         if(AllSettings.getAlternateSurface().getValue()){
             SurfaceView surfaceView = new SurfaceView(getContext());
+            surfaceView.getHolder().setFormat(android.graphics.PixelFormat.RGBX_8888);
             mSurface = surfaceView;
 
             surfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
                 private boolean isCalled = isAlreadyRunning;
                 @Override
                 public void surfaceCreated(@NonNull SurfaceHolder holder) {
+                    if (!mIsRenderingStarted) {
+                        mIsRenderingStarted = true;
+                        if (mOnRenderingStartedListener != null) mOnRenderingStartedListener.isStarted();
+                    }
                     if(isCalled) {
                         JREUtils.setupBridgeWindow(bridgeSurface(surfaceView.getHolder().getSurface()));
                         return;

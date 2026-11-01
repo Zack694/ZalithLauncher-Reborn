@@ -10,6 +10,7 @@ import com.movtery.zalithlauncher.feature.version.Version
 import com.movtery.zalithlauncher.utils.ZHTools
 import com.movtery.zalithlauncher.utils.path.LibPath
 import com.movtery.zalithlauncher.utils.path.PathManager
+import net.kdt.pojavlaunch.Architecture
 import net.kdt.pojavlaunch.AWTCanvasView
 import net.kdt.pojavlaunch.JMinecraftVersionList
 import net.kdt.pojavlaunch.Tools
@@ -189,9 +190,9 @@ class LaunchArgs(
 
     private fun getLwjglNativeDir(lwjglComponent: String): File {
         val abi = when (Tools.DEVICE_ARCHITECTURE) {
-            net.kdt.pojavlaunch.Architecture.ARCH_ARM -> "armeabi-v7a"
-            net.kdt.pojavlaunch.Architecture.ARCH_X86 -> "x86"
-            net.kdt.pojavlaunch.Architecture.ARCH_X86_64 -> "x86_64"
+            Architecture.ARCH_ARM -> "armeabi-v7a"
+            Architecture.ARCH_X86 -> "x86"
+            Architecture.ARCH_X86_64 -> "x86_64"
             else -> "arm64-v8a"
         }
         return File(PathManager.DIR_FILE, "$lwjglComponent/natives/$abi")

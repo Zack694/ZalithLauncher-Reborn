@@ -135,9 +135,9 @@ public class ControlButton extends TextView implements ControlInterface {
                     if(gameSurface != null) gameSurface.dispatchTouchEvent(event);
                 }
 
-                //If out of bounds
-                if(event.getX() < getControlView().getLeft() || event.getX() > getControlView().getRight() ||
-                        event.getY() < getControlView().getTop()  || event.getY() > getControlView().getBottom()){
+                //If out of bounds (event.getX/Y are button-local: 0..getWidth, 0..getHeight)
+                if(event.getX() < 0 || event.getX() > getWidth() ||
+                        event.getY() < 0 || event.getY() > getHeight()){
                     if(getProperties().isSwipeable && !mIsPointerOutOfBounds){
                         //Remove keys
                         if(!triggerToggle()) {
@@ -161,6 +161,14 @@ public class ControlButton extends TextView implements ControlInterface {
                 break;
 
             case MotionEvent.ACTION_DOWN: // 0
+                try {
+                    requestUnbufferedDispatch(event);
+                } catch (Throwable ignored) {
+                }
+                if(!getProperties().isToggle){
+                    sendKeyPresses(true);
+                }
+                break;
             case MotionEvent.ACTION_POINTER_DOWN: // 5
                 if(!getProperties().isToggle){
                     sendKeyPresses(true);
@@ -186,7 +194,7 @@ public class ControlButton extends TextView implements ControlInterface {
                 return false;
         }
 
-        return super.onTouchEvent(event);
+        return true;
     }
 
 
@@ -203,14 +211,28 @@ public class ControlButton extends TextView implements ControlInterface {
         return false;
     }
 
-    // FIXED: This method now processes regular keys first, then special keys
-    // This ensures predictable order when releasing mixed key bindings
+    // Dispatch native JNI key events FIRST (~1us @CriticalNative) before
+    // triggering Android UI redraw (setActivated).
     public void sendKeyPresses(boolean isDown){
+        if (!mProperties.isClicker) {
+            // First pass: Process all regular keyboard keys immediately
+            for(int keycode : mProperties.keycodes){
+                if(keycode >= GLFW_KEY_UNKNOWN){
+                    sendKeyPress(keycode, CallbackBridge.getCurrentMods(), isDown);
+                    CallbackBridge.setModifiers(keycode, isDown);
+                }
+            }
+
+            // Second pass: Process all special keys (mouse buttons, etc.)
+            for(int keycode : mProperties.keycodes){
+                if(keycode < GLFW_KEY_UNKNOWN){
+                    sendSpecialKey(keycode, isDown);
+                }
+            }
+        }
+
         setActivated(isDown);
 
-        // Push-to-talk mic: while this button is held (or toggled on), record the
-        // microphone into the built-in game recorder. Fires for both hold and
-        // toggle modes because both funnel through sendKeyPresses(isDown).
         if (mProperties.isVoicechatMic) {
             com.movtery.zalithlauncher.recorder.GameRecorder.setMicHeld(isDown);
         }
@@ -220,22 +242,6 @@ public class ControlButton extends TextView implements ControlInterface {
                 startClickerLoop();
             } else {
                 stopClickerLoop();
-            }
-            return;
-        }
-
-        // First pass: Process all regular keyboard keys
-        for(int keycode : mProperties.keycodes){
-            if(keycode >= GLFW_KEY_UNKNOWN){
-                sendKeyPress(keycode, CallbackBridge.getCurrentMods(), isDown);
-                CallbackBridge.setModifiers(keycode, isDown);
-            }
-        }
-
-        // Second pass: Process all special keys (mouse buttons, etc.)
-        for(int keycode : mProperties.keycodes){
-            if(keycode < GLFW_KEY_UNKNOWN){
-                sendSpecialKey(keycode, isDown);
             }
         }
     }

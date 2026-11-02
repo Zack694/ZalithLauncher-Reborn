@@ -300,6 +300,12 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            try {
+                requestUnbufferedDispatch(event);
+            } catch (Throwable ignored) {
+            }
+        }
         if (mCurrentTouchProcessor != null) {
             mCurrentTouchProcessor.dispatchTouchEvent(event, this);
         }
@@ -433,6 +439,19 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
      * demand from the Special Menu (the recorder then briefly borrows this surface).
      */
     private Surface bridgeSurface(Surface displaySurface){
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && displaySurface != null) {
+            try {
+                float maxHz = 120f;
+                android.view.Display d = getDisplay();
+                if (d != null) {
+                    for (android.view.Display.Mode m : d.getSupportedModes()) {
+                        maxHz = Math.max(maxHz, m.getRefreshRate());
+                    }
+                }
+                displaySurface.setFrameRate(maxHz, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
+            } catch (Throwable ignored) {
+            }
+        }
         try {
             GameRecorder.getInstance().setDisplayTarget(
                     getContext(), displaySurface, windowWidth, windowHeight);

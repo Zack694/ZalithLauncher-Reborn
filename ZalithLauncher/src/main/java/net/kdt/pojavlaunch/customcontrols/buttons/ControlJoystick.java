@@ -287,6 +287,11 @@ public class ControlJoystick extends View implements ControlInterface {
 
         switch (actionMasked) {
             case MotionEvent.ACTION_DOWN:
+                try {
+                    requestUnbufferedDispatch(event);
+                } catch (Throwable ignored) {
+                }
+                // fall through
             case MotionEvent.ACTION_POINTER_DOWN: {
                 if (mActivePointerId != INVALID_POINTER) break;
                 float x = event.getX(actionIndex);

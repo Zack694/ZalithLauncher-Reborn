@@ -203,6 +203,31 @@ public class MainActivity extends BaseActivity implements
         );
         window.setSustainedPerformanceMode(AllSettings.getSustainedPerformance().getValue());
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+        // Unlock highest display refresh rate (120Hz / 144Hz / 165Hz) at native resolution
+        try {
+            android.view.Display display = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                    ? getDisplay()
+                    : getWindowManager().getDefaultDisplay();
+            if (display != null) {
+                android.view.Display.Mode currentMode = display.getMode();
+                android.view.Display.Mode[] modes = display.getSupportedModes();
+                android.view.Display.Mode bestMode = currentMode;
+                for (android.view.Display.Mode mode : modes) {
+                    if (mode.getPhysicalWidth() == currentMode.getPhysicalWidth()
+                            && mode.getPhysicalHeight() == currentMode.getPhysicalHeight()
+                            && mode.getRefreshRate() > bestMode.getRefreshRate()) {
+                        bestMode = mode;
+                    }
+                }
+                if (bestMode.getModeId() != currentMode.getModeId()) {
+                    WindowManager.LayoutParams lp = window.getAttributes();
+                    lp.preferredDisplayModeId = bestMode.getModeId();
+                    window.setAttributes(lp);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     protected void initLayout() {

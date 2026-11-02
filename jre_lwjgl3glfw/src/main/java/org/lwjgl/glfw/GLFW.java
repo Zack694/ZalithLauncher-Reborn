@@ -551,7 +551,12 @@ public class GLFW
         memPutInt(mGLFWVideoMode.address() + mGLFWVideoMode.REDBITS, 8);
         memPutInt(mGLFWVideoMode.address() + mGLFWVideoMode.GREENBITS, 8);
         memPutInt(mGLFWVideoMode.address() + mGLFWVideoMode.BLUEBITS, 8);
-        memPutInt(mGLFWVideoMode.address() + mGLFWVideoMode.REFRESHRATE, 60);
+        int refreshRate = 120;
+        try {
+            refreshRate = Integer.parseInt(System.getProperty("glfwstub.refreshRate", "120"));
+        } catch (NumberFormatException ignored) {
+        }
+        memPutInt(mGLFWVideoMode.address() + mGLFWVideoMode.REFRESHRATE, refreshRate);
 
         // A way to generate key code names
         Field[] thisFieldArr = GLFW.class.getFields();

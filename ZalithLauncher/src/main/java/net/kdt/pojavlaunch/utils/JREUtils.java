@@ -535,6 +535,22 @@ public final class JREUtils {
         userArgs.addAll(jvmArgs);
         addPureHybridCacheOverrides(userArgs);
 
+        try {
+            android.view.Display d = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                    ? activity.getDisplay()
+                    : activity.getWindowManager().getDefaultDisplay();
+            if (d != null) {
+                int maxHz = Math.round(d.getRefreshRate());
+                for (android.view.Display.Mode m : d.getSupportedModes()) {
+                    maxHz = Math.max(maxHz, Math.round(m.getRefreshRate()));
+                }
+                if (maxHz >= 60) {
+                    userArgs.add("-Dglfwstub.refreshRate=" + maxHz);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
         activity.runOnUiThread(() ->
                 Toast.makeText(
                         activity,

@@ -81,7 +81,7 @@ object MCOptions {
 
     fun get(key: String): String? = parameterMap[key]
 
-    fun containsKey(key: String): Boolean = key in parameterMap
+    fun containsKey(key: String): Boolean = parameterMap.containsKey(key)
 
     fun save() {
         getOptionsFile().takeIf { it.exists() }?.let { optionsFile ->

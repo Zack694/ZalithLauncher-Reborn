@@ -267,6 +267,7 @@ public final class JREUtils {
     }
 
     private static void setJavaEnv(Map<String, String> envMap, String jreHome) {
+        envMap.put("ALSOFT_LOGLEVEL", "0"); // silence OpenAL Soft log stalls
         envMap.put("POJAV_NATIVEDIR", DIR_NATIVE_LIB);
         envMap.put("DRIVER_PATH", DriverPluginManager.getDriver().getPath());
         envMap.put("JAVA_HOME", jreHome);
@@ -480,10 +481,32 @@ public final class JREUtils {
             userArgs.add("-XX:+ParallelRefProcEnabled");
             userArgs.add("-XX:MaxGCPauseMillis=30");
             userArgs.add("-XX:+DisableExplicitGC");
+            userArgs.add("-XX:+UseStringDeduplication"); // G1-only: kept with the GC block
             userArgs.add("-XX:G1NewSizePercent=20");
             userArgs.add("-XX:G1ReservePercent=15");
             userArgs.add("-XX:G1HeapRegionSize=8M");
         }
+
+        // --- In-game FPS boosters: chunk worker cap, LWJGL3 fast path, Netty,
+        // --- ARM64 NEON/FMA, C2 JIT inlining (see ZalithLauncher-120Hz-LockFix-And-MaxFPS.patch)
+        userArgs.add("-Dmax.bg.threads=3");
+        userArgs.add("-Dorg.lwjgl.util.NoChecks=true");
+        userArgs.add("-Dorg.lwjgl.util.NoFunctionChecks=true");
+        userArgs.add("-Dorg.lwjgl.system.allocator=system");
+        userArgs.add("-Dio.netty.leakDetection.level=disabled");
+        userArgs.add("-Dio.netty.allocator.type=pooled");
+        userArgs.add("-XX:+UnlockExperimentalVMOptions");
+        userArgs.add("-XX:+UnlockDiagnosticVMOptions");
+        userArgs.add("-XX:+AlwaysPreTouch");
+        userArgs.add("-XX:+UseTransparentHugePages");
+        userArgs.add("-XX:+UseCompressedOops");
+        userArgs.add("-XX:+UseCompressedClassPointers");
+        userArgs.add("-XX:+OptimizeStringConcat");
+        userArgs.add("-XX:+UseSIMDForMemoryOps");
+        userArgs.add("-XX:+UseFMA");
+        userArgs.add("-XX:MaxInlineLevel=15");
+        userArgs.add("-XX:InlineSmallCode=2500");
+        userArgs.add("-XX:CompileThreshold=1500");
 
         if (Renderers.INSTANCE.isCurrentRendererValid()) {
             userArgs.add("-Dorg.lwjgl.opengl.libname=" + loadGraphicsLibrary());

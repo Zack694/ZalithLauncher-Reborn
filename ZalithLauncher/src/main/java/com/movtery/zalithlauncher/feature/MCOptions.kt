@@ -11,10 +11,11 @@ import org.greenrobot.eventbus.EventBus
 import org.lwjgl.glfw.CallbackBridge.windowHeight
 import org.lwjgl.glfw.CallbackBridge.windowWidth
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.io.IOException
 
 object MCOptions {
-    private val parameterMap = mutableMapOf<String, String>()
+    private val parameterMap = ConcurrentHashMap<String, String>()
     private var fileObserver: FileObserver? = null
     private lateinit var versionGetter: MinecraftVersionGetter
 

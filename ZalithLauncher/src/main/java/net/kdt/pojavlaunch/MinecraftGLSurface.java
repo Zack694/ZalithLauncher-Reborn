@@ -129,9 +129,12 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
     public void start(boolean isAlreadyRunning, AbstractTouchpad touchpad){
         setUpPointerCapture(touchpad);
         mInGUIProcessor.setAbstractTouchpad(touchpad);
-        if (android.os.Build.VERSION.SDK_INT >= 34) {
+        if (android.os.Build.VERSION.SDK_INT >= 35) {
+            // View.setRequestedFrameRate / REQUESTED_FRAME_RATE_CATEGORY_HIGH are API 35
+            // symbols and compileSdk is 34, so resolve them reflectively.
             try {
-                setRequestedFrameRate(View.REQUESTED_FRAME_RATE_CATEGORY_HIGH);
+                View.class.getMethod("setRequestedFrameRate", float.class)
+                        .invoke(this, -2.0f /* REQUESTED_FRAME_RATE_CATEGORY_HIGH */);
             } catch (Throwable ignored) {
             }
         }

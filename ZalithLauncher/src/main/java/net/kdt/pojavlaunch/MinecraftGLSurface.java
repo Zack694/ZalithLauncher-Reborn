@@ -58,6 +58,9 @@ import fr.spse.gamepad_remapper.RemapperView;
  * Class dealing with showing minecraft surface and taking inputs to dispatch them to minecraft
  */
 public class MinecraftGLSurface extends View implements GrabListener, DirectGamepadEnableHandler {
+
+    /** Display-side surface kept referenced so the high frame-rate hint persists. */
+    private Surface mDisplaySurface;
     public static boolean sdlEnabled = false;
     /* Gamepad object for gamepad inputs, instantiated on need */
     private Gamepad mGamepad = null;
@@ -126,6 +129,15 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
     public void start(boolean isAlreadyRunning, AbstractTouchpad touchpad){
         setUpPointerCapture(touchpad);
         mInGUIProcessor.setAbstractTouchpad(touchpad);
+        if (android.os.Build.VERSION.SDK_INT >= 35) {
+            // View.setRequestedFrameRate / REQUESTED_FRAME_RATE_CATEGORY_HIGH are API 35
+            // symbols and compileSdk is 34, so resolve them reflectively.
+            try {
+                View.class.getMethod("setRequestedFrameRate", float.class)
+                        .invoke(this, -2.0f /* REQUESTED_FRAME_RATE_CATEGORY_HIGH */);
+            } catch (Throwable ignored) {
+            }
+        }
         if(AllSettings.getAlternateSurface().getValue()){
             SurfaceView surfaceView = new SurfaceView(getContext());
             surfaceView.getHolder().setFormat(android.graphics.PixelFormat.RGBX_8888);
@@ -168,7 +180,9 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
                 private boolean isCalled = isAlreadyRunning;
                 @Override
                 public void onSurfaceTextureAvailable(@NonNull SurfaceTexture surface, int width, int height) {
-                    Surface tSurface = new Surface(surface);
+                    if (mDisplaySurface != null) mDisplaySurface.release();
+                    mDisplaySurface = new Surface(surface); // persistent: frame-rate hint survives GC cycles
+                    Surface tSurface = mDisplaySurface;
                     if(isCalled) {
                         JREUtils.setupBridgeWindow(bridgeSurface(tSurface));
                         return;
@@ -185,6 +199,7 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
 
                 @Override
                 public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture surface) {
+                    if (mDisplaySurface != null) { mDisplaySurface.release(); mDisplaySurface = null; }
                     return true;
                 }
 
@@ -448,7 +463,7 @@ public class MinecraftGLSurface extends View implements GrabListener, DirectGame
                         maxHz = Math.max(maxHz, m.getRefreshRate());
                     }
                 }
-                displaySurface.setFrameRate(maxHz, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);
+                displaySurface.setFrameRate(maxHz, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
             } catch (Throwable ignored) {
             }
         }

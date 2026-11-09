@@ -1,3 +1,4 @@
+#include <sys/resource.h>
 #include <jni.h>
 #include <assert.h>
 #include <dlfcn.h>
@@ -229,6 +230,8 @@ EXTERNAL_API void pojavMakeCurrent(void* window) {
         s_render_thread_pinned = true;
         if (getenv("POJAV_BIG_CORE_AFFINITY") != NULL) {
             bigcore_set_affinity();
+            // Render-thread priority boost (PRIORITY_DISPLAY), applied once per thread
+            setpriority(PRIO_PROCESS, 0, -8);
         }
     }
 

@@ -204,27 +204,35 @@ public class MainActivity extends BaseActivity implements
         window.setSustainedPerformanceMode(AllSettings.getSustainedPerformance().getValue());
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
-        // Unlock highest display refresh rate (120Hz / 144Hz / 165Hz) at native resolution
+        applyMaxRefreshRate();
+    }
+
+    /**
+     * Locks the display to the highest refresh rate available at the current
+     * resolution (120/144/165 Hz panels). Re-applied on resume and window focus
+     * so the high-rate mode survives system window updates.
+     */
+    private void applyMaxRefreshRate() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        android.view.Display display = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                ? getDisplay()
+                : getWindowManager().getDefaultDisplay();
+        if (display == null) return;
         try {
-            android.view.Display display = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-                    ? getDisplay()
-                    : getWindowManager().getDefaultDisplay();
-            if (display != null) {
-                android.view.Display.Mode currentMode = display.getMode();
-                android.view.Display.Mode[] modes = display.getSupportedModes();
-                android.view.Display.Mode bestMode = currentMode;
-                for (android.view.Display.Mode mode : modes) {
-                    if (mode.getPhysicalWidth() == currentMode.getPhysicalWidth()
-                            && mode.getPhysicalHeight() == currentMode.getPhysicalHeight()
-                            && mode.getRefreshRate() > bestMode.getRefreshRate()) {
-                        bestMode = mode;
-                    }
+            android.view.Display.Mode currentMode = display.getMode();
+            android.view.Display.Mode[] modes = display.getSupportedModes();
+            android.view.Display.Mode bestMode = currentMode;
+            for (android.view.Display.Mode mode : modes) {
+                if (mode.getPhysicalWidth() == currentMode.getPhysicalWidth()
+                        && mode.getPhysicalHeight() == currentMode.getPhysicalHeight()
+                        && mode.getRefreshRate() > bestMode.getRefreshRate()) {
+                    bestMode = mode;
                 }
-                if (bestMode.getModeId() != currentMode.getModeId()) {
-                    WindowManager.LayoutParams lp = window.getAttributes();
-                    lp.preferredDisplayModeId = bestMode.getModeId();
-                    window.setAttributes(lp);
-                }
+            }
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            if (lp.preferredDisplayModeId != bestMode.getModeId()) {
+                lp.preferredDisplayModeId = bestMode.getModeId();
+                getWindow().setAttributes(lp);
             }
         } catch (Throwable ignored) {
         }
@@ -416,6 +424,7 @@ public class MainActivity extends BaseActivity implements
     @Override
     protected void onResume() {
         super.onResume();
+        applyMaxRefreshRate();
 
         if (AllStaticSettings.enableGyro) {
             gyroControl.enable();
@@ -527,6 +536,7 @@ public class MainActivity extends BaseActivity implements
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) applyMaxRefreshRate();
         CallbackBridge.nativeSetWindowAttrib(LwjglGlfwKeycode.GLFW_FOCUSED, hasFocus ? 1 : 0);
     }
 

@@ -18,9 +18,9 @@ import com.movtery.zalithlauncher.ui.fragment.settings.wrapper.ListSettingsWrapp
 import com.movtery.zalithlauncher.ui.fragment.settings.wrapper.SeekBarSettingsWrapper
 import com.movtery.zalithlauncher.ui.fragment.settings.wrapper.SwitchSettingsWrapper
 import com.movtery.zalithlauncher.utils.file.FileTools.Companion.formatFileSize
-import com.movtery.zalithlauncher.utils.platform.MemoryUtils.Companion.getFreeDeviceMemory
-import com.movtery.zalithlauncher.utils.platform.MemoryUtils.Companion.getTotalDeviceMemory
-import com.movtery.zalithlauncher.utils.platform.MemoryUtils.Companion.getUsedDeviceMemory
+import com.movtery.zalithlauncher.utils.platform.MemoryUtils.getFreeDeviceMemory
+import com.movtery.zalithlauncher.utils.platform.MemoryUtils.getTotalDeviceMemory
+import com.movtery.zalithlauncher.utils.platform.MemoryUtils.getUsedDeviceMemory
 import com.movtery.zalithlauncher.utils.stringutils.StringUtils
 import net.kdt.pojavlaunch.Architecture
 import net.kdt.pojavlaunch.Tools

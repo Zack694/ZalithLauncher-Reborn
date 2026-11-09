@@ -1,3 +1,4 @@
+#include <sys/resource.h>
 #include <jni.h>
 #include <sys/types.h>
 #include <stdbool.h>
@@ -37,6 +38,8 @@ static bool recordBuffer(char* buf, ssize_t len) {
 }
 
 static void *logger_thread() {
+    // Logger runs in the background: never steal CPU from the render thread
+    setpriority(PRIO_PROCESS, 0, 10);
     JNIEnv *env;
     jstring writeString;
 
@@ -58,8 +61,10 @@ static void *logger_thread() {
         if (shouldRecordString && logListener != NULL)
         {
             writeString = (*env)->NewStringUTF(env, buf); //send to app without newline
-            (*env)->CallVoidMethod(env, logListener, logger_onEventLogged, writeString);
-            (*env)->DeleteLocalRef(env, writeString);
+            if (writeString != NULL) { // guard against UTF decode failures
+                (*env)->CallVoidMethod(env, logListener, logger_onEventLogged, writeString);
+                (*env)->DeleteLocalRef(env, writeString);
+            }
         }
     }
     (*dvm)->DetachCurrentThread(dvm);

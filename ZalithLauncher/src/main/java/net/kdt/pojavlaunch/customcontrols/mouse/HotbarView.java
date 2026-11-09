@@ -79,8 +79,8 @@ public class HotbarView extends View implements View.OnLayoutChangeListener, Run
     }
 
     private void init() {
-        setAlpha(0);
-        setBackgroundColor(Color.parseColor("#80E64242"));
+        // Invisible hit-area view: no background layer to composite each frame
+        setBackground(null);
         adjustAnimPlayer.duration(800);
         adjustAnimPlayer.apply(new AnimPlayer.Entry(this, Animations.FadeOut));
     }
@@ -164,6 +164,9 @@ public class HotbarView extends View implements View.OnLayoutChangeListener, Run
     @SuppressWarnings("ClickableViewAccessibility") // performClick does not report coordinates.
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP && event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            requestUnbufferedDispatch(event);
+        }
         if(!CallbackBridge.isGrabbing()) return false;
         boolean hasDoubleTapped = mDoubleTapDetector.onTouchEvent(event);
 

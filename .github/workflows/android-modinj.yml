@@ -39,11 +39,18 @@ jobs:
           KEY_ALIAS: ${{ secrets.RELEASE_ALIAS }}
         run: |
           chmod +x ModInj/gradlew
-          ModInj/gradlew -p ModInj assembleRelease --no-daemon \
-            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/release.jks \
-            -Pandroid.injected.signing.store.password=$MOVTERY_KEYSTORE_PASSWORD \
-            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$MOVTERY_KEYSTORE_PASSWORD
+          # Retry: the gradle wrapper download occasionally dies with
+          # HTTP 504 from the GitHub release CDN (transient infra flake)
+          for i in 1 2 3; do
+            if ModInj/gradlew -p ModInj assembleRelease --no-daemon \
+              -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/release.jks \
+              -Pandroid.injected.signing.store.password=$MOVTERY_KEYSTORE_PASSWORD \
+              -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+              -Pandroid.injected.signing.key.password=$MOVTERY_KEYSTORE_PASSWORD; then exit 0; fi
+            echo "::warning::gradlew attempt $i failed (transient network/CDN 504) — retrying in 60s"
+            sleep 60
+          done
+          echo "All 3 gradle attempts failed"; exit 1
 
       - name: Upload ModInj Release
         continue-on-error: true

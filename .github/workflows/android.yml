@@ -27,6 +27,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          # Cache ~/.gradle (incl. wrapper dists) so the Gradle zip is not
+          # re-downloaded from the GitHub release CDN on every run
+          cache: 'gradle'
 
       - name: Decode Keystore
         run: |
@@ -37,7 +40,14 @@ jobs:
         run: |
           chmod +x gradlew
           mkdir out
-          ./gradlew jre_lwjgl3glfw:build --no-daemon
+          # Retry: the gradle wrapper download occasionally dies with
+          # HTTP 504 from the GitHub release CDN (transient infra flake)
+          for i in 1 2 3; do
+            if ./gradlew jre_lwjgl3glfw:build --no-daemon; then exit 0; fi
+            echo "::warning::gradlew attempt $i failed (transient network/CDN 504) — retrying in 60s"
+            sleep 60
+          done
+          echo "All 3 gradle attempts failed"; exit 1
 
       - name: Build Release ${{ matrix.arch }}
         env:
@@ -46,11 +56,17 @@ jobs:
         run: |
           chmod +x gradlew
           # Using absolute path ($GITHUB_WORKSPACE) so Gradle finds the file 100%
-          ./gradlew ZalithLauncher:assemblerelease -Darch=${{ matrix.arch }} \
-            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/release.jks \
-            -Pandroid.injected.signing.store.password=$MOVTERY_KEYSTORE_PASSWORD \
-            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$MOVTERY_KEYSTORE_PASSWORD
+          # Retry: wrapper download / dependency fetches can hit transient CDN 504s
+          for i in 1 2 3; do
+            if ./gradlew ZalithLauncher:assemblerelease -Darch=${{ matrix.arch }} \
+              -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/release.jks \
+              -Pandroid.injected.signing.store.password=$MOVTERY_KEYSTORE_PASSWORD \
+              -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+              -Pandroid.injected.signing.key.password=$MOVTERY_KEYSTORE_PASSWORD; then exit 0; fi
+            echo "::warning::gradlew attempt $i failed (transient network/CDN 504) — retrying in 60s"
+            sleep 60
+          done
+          echo "All 3 gradle attempts failed"; exit 1
 
       - name: Upload Release ${{matrix.arch}}
         continue-on-error: true
@@ -76,17 +92,28 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
 
       - name: Build JRE JAR files
         run: |
           chmod +x gradlew
           mkdir out
-          ./gradlew jre_lwjgl3glfw:build --no-daemon
+          for i in 1 2 3; do
+            if ./gradlew jre_lwjgl3glfw:build --no-daemon; then exit 0; fi
+            echo "::warning::gradlew attempt $i failed (transient network/CDN 504) — retrying in 60s"
+            sleep 60
+          done
+          echo "All 3 gradle attempts failed"; exit 1
 
       - name: Build Debug ${{matrix.arch}}
         run: |
           chmod +x gradlew
-          ./gradlew ZalithLauncher:assembleDebug -Darch=${{ matrix.arch }}
+          for i in 1 2 3; do
+            if ./gradlew ZalithLauncher:assembleDebug -Darch=${{ matrix.arch }}; then exit 0; fi
+            echo "::warning::gradlew attempt $i failed (transient network/CDN 504) — retrying in 60s"
+            sleep 60
+          done
+          echo "All 3 gradle attempts failed"; exit 1
 
       - name: Upload Debug ${{matrix.arch}}
         uses: actions/upload-artifact@v4

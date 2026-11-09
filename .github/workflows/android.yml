@@ -45,6 +45,26 @@ jobs:
           sed -i "s#^distributionUrl=.*#distributionUrl=https\\://mirrors.cloud.tencent.com/gradle/$VER#" gradle/wrapper/gradle-wrapper.properties
           grep distributionUrl gradle/wrapper/gradle-wrapper.properties
 
+      - name: Install gradle init script (Aliyun repos first)
+        # plugins.gradle.org and Maven Central redirect kotlin-compiler-embeddable
+        # to JetBrains' GitHub releases, which 504s during the outage. Gradle
+        # aborts on 5xx instead of falling through, so the Aliyun mirror (which
+        # serves the artifact directly) must be FIRST in the repository list.
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/ci-mirror.gradle <<'EOF'
+          gradle.projectsLoaded {
+              rootProject.allprojects { p ->
+                  def aliyun = p.repositories.maven { name 'ciAliyunPublic'; url 'https://maven.aliyun.com/repository/public' }
+                  p.repositories.remove(aliyun)
+                  p.repositories.addFirst(aliyun)
+                  def aliyunPlugin = p.buildscript.repositories.maven { name 'ciAliyunPlugin'; url 'https://maven.aliyun.com/repository/gradle-plugin' }
+                  p.buildscript.repositories.remove(aliyunPlugin)
+                  p.buildscript.repositories.addFirst(aliyunPlugin)
+              }
+          }
+          EOF
+
       - name: Build JRE JAR files
         run: |
           chmod +x gradlew
@@ -108,6 +128,22 @@ jobs:
           VER=$(grep -oP 'gradle-\d+(\.\d+)*-bin\.zip' gradle/wrapper/gradle-wrapper.properties | head -1)
           sed -i "s#^distributionUrl=.*#distributionUrl=https\\://mirrors.cloud.tencent.com/gradle/$VER#" gradle/wrapper/gradle-wrapper.properties
           grep distributionUrl gradle/wrapper/gradle-wrapper.properties
+
+      - name: Install gradle init script (Aliyun repos first)
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/ci-mirror.gradle <<'EOF'
+          gradle.projectsLoaded {
+              rootProject.allprojects { p ->
+                  def aliyun = p.repositories.maven { name 'ciAliyunPublic'; url 'https://maven.aliyun.com/repository/public' }
+                  p.repositories.remove(aliyun)
+                  p.repositories.addFirst(aliyun)
+                  def aliyunPlugin = p.buildscript.repositories.maven { name 'ciAliyunPlugin'; url 'https://maven.aliyun.com/repository/gradle-plugin' }
+                  p.buildscript.repositories.remove(aliyunPlugin)
+                  p.buildscript.repositories.addFirst(aliyunPlugin)
+              }
+          }
+          EOF
 
       - name: Build JRE JAR files
         run: |

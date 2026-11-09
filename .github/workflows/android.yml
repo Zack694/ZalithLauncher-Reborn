@@ -53,15 +53,15 @@ jobs:
         run: |
           mkdir -p ~/.gradle/init.d
           cat > ~/.gradle/init.d/ci-mirror.gradle <<'EOF'
-          gradle.projectsLoaded {
-              rootProject.allprojects { p ->
-                  def aliyun = p.repositories.maven { name 'ciAliyunPublic'; url 'https://maven.aliyun.com/repository/public' }
-                  p.repositories.remove(aliyun)
-                  p.repositories.addFirst(aliyun)
-                  def aliyunPlugin = p.buildscript.repositories.maven { name 'ciAliyunPlugin'; url 'https://maven.aliyun.com/repository/gradle-plugin' }
-                  p.buildscript.repositories.remove(aliyunPlugin)
-                  p.buildscript.repositories.addFirst(aliyunPlugin)
-              }
+          gradle.settingsEvaluated { s ->
+              def drm = s.dependencyResolutionManagement
+              def aliyun = drm.repositories.maven { name 'ciAliyunPublic'; url 'https://maven.aliyun.com/repository/public' }
+              drm.repositories.remove(aliyun)
+              drm.repositories.addFirst(aliyun)
+              def pm = s.pluginManagement
+              def aliyunPlugin = pm.repositories.maven { name 'ciAliyunPlugin'; url 'https://maven.aliyun.com/repository/gradle-plugin' }
+              pm.repositories.remove(aliyunPlugin)
+              pm.repositories.addFirst(aliyunPlugin)
           }
           EOF
 
@@ -133,15 +133,15 @@ jobs:
         run: |
           mkdir -p ~/.gradle/init.d
           cat > ~/.gradle/init.d/ci-mirror.gradle <<'EOF'
-          gradle.projectsLoaded {
-              rootProject.allprojects { p ->
-                  def aliyun = p.repositories.maven { name 'ciAliyunPublic'; url 'https://maven.aliyun.com/repository/public' }
-                  p.repositories.remove(aliyun)
-                  p.repositories.addFirst(aliyun)
-                  def aliyunPlugin = p.buildscript.repositories.maven { name 'ciAliyunPlugin'; url 'https://maven.aliyun.com/repository/gradle-plugin' }
-                  p.buildscript.repositories.remove(aliyunPlugin)
-                  p.buildscript.repositories.addFirst(aliyunPlugin)
-              }
+          gradle.settingsEvaluated { s ->
+              def drm = s.dependencyResolutionManagement
+              def aliyun = drm.repositories.maven { name 'ciAliyunPublic'; url 'https://maven.aliyun.com/repository/public' }
+              drm.repositories.remove(aliyun)
+              drm.repositories.addFirst(aliyun)
+              def pm = s.pluginManagement
+              def aliyunPlugin = pm.repositories.maven { name 'ciAliyunPlugin'; url 'https://maven.aliyun.com/repository/gradle-plugin' }
+              pm.repositories.remove(aliyunPlugin)
+              pm.repositories.addFirst(aliyunPlugin)
           }
           EOF
 

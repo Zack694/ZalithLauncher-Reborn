@@ -36,6 +36,15 @@ jobs:
           # Decoding directly into the workspace root
           echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > $GITHUB_WORKSPACE/release.jks
 
+      - name: Point gradle wrapper at Tencent mirror
+        # GitHub's release CDN has been returning 504 to Actions runners for
+        # github.com/*/releases/download/* — fetch the gradle distribution from
+        # the Tencent mirror instead
+        run: |
+          VER=$(grep -oP 'gradle-\d+(\.\d+)*-bin\.zip' gradle/wrapper/gradle-wrapper.properties | head -1)
+          sed -i "s#^distributionUrl=.*#distributionUrl=https\\://mirrors.cloud.tencent.com/gradle/$VER#" gradle/wrapper/gradle-wrapper.properties
+          grep distributionUrl gradle/wrapper/gradle-wrapper.properties
+
       - name: Build JRE JAR files
         run: |
           chmod +x gradlew
@@ -93,6 +102,12 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
           cache: 'gradle'
+
+      - name: Point gradle wrapper at Tencent mirror
+        run: |
+          VER=$(grep -oP 'gradle-\d+(\.\d+)*-bin\.zip' gradle/wrapper/gradle-wrapper.properties | head -1)
+          sed -i "s#^distributionUrl=.*#distributionUrl=https\\://mirrors.cloud.tencent.com/gradle/$VER#" gradle/wrapper/gradle-wrapper.properties
+          grep distributionUrl gradle/wrapper/gradle-wrapper.properties
 
       - name: Build JRE JAR files
         run: |

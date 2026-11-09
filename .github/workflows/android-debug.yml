@@ -28,6 +28,15 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Point gradle wrapper at Tencent mirror
+        # GitHub's release CDN has been returning 504 to Actions runners for
+        # github.com/*/releases/download/* — fetch the gradle distribution from
+        # the Tencent mirror instead (same file, verified by wrapper sha256 if set)
+        run: |
+          VER=$(grep -oP 'gradle-\d+(\.\d+)*-bin\.zip' gradle/wrapper/gradle-wrapper.properties | head -1)
+          sed -i "s#^distributionUrl=.*#distributionUrl=https\\://mirrors.cloud.tencent.com/gradle/$VER#" gradle/wrapper/gradle-wrapper.properties
+          grep distributionUrl gradle/wrapper/gradle-wrapper.properties
+
       - name: Make gradlew executable
         run: chmod +x gradlew
 

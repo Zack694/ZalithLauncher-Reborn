@@ -33,6 +33,15 @@ jobs:
           # Same movtery-key.jks the launcher release builds sign with
           echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > $GITHUB_WORKSPACE/release.jks
 
+      - name: Point gradle wrapper at Tencent mirror
+        # GitHub's release CDN has been returning 504 to Actions runners for
+        # github.com/*/releases/download/* — fetch the gradle distribution from
+        # the Tencent mirror instead
+        run: |
+          VER=$(grep -oP 'gradle-\d+(\.\d+)*-bin\.zip' ModInj/gradle/wrapper/gradle-wrapper.properties | head -1)
+          sed -i "s#^distributionUrl=.*#distributionUrl=https\\://mirrors.cloud.tencent.com/gradle/$VER#" ModInj/gradle/wrapper/gradle-wrapper.properties
+          grep distributionUrl ModInj/gradle/wrapper/gradle-wrapper.properties
+
       - name: Build ModInj Release
         env:
           MOVTERY_KEYSTORE_PASSWORD: ${{ secrets.MOVTERY_KEYSTORE_PASSWORD }}

@@ -332,7 +332,7 @@ public interface ControlInterface extends View.OnLongClickListener, GrabListener
     }
 
     default void injectProperties() {
-        getControlView().setTranslationZ(0f); // flat buttons: no elevation shadow redraws
+        getControlView().post(() -> getControlView().setTranslationZ(10)); // keep buttons above the opaque game surface (Z beats sibling draw order)
         getControlView().setSoundEffectsEnabled(false);
         getControlView().setHapticFeedbackEnabled(false);
     }
@@ -390,7 +390,6 @@ public interface ControlInterface extends View.OnLongClickListener, GrabListener
 
     default void injectLayoutParamBehavior() {
         getControlView().addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
-            if (left == oldLeft && right == oldRight && top == oldTop && bottom == oldBottom) return;
             getProperties().setWidth(right - left);
             getProperties().setHeight(bottom - top);
             setBackground();

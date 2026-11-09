@@ -79,8 +79,9 @@ public class HotbarView extends View implements View.OnLayoutChangeListener, Run
     }
 
     private void init() {
-        // Invisible hit-area view: no background layer to composite each frame
-        setBackground(null);
+        // Invisible hit-area indicator: upstream red judge box kept at view alpha 0
+        setBackgroundColor(Color.parseColor("#80E64242"));
+        setAlpha(0);
         adjustAnimPlayer.duration(800);
         adjustAnimPlayer.apply(new AnimPlayer.Entry(this, Animations.FadeOut));
     }

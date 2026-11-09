@@ -495,6 +495,7 @@ public final class JREUtils {
         userArgs.add("-Dorg.lwjgl.system.allocator=system");
         userArgs.add("-Dio.netty.leakDetection.level=disabled");
         userArgs.add("-Dio.netty.allocator.type=pooled");
+        userArgs.add("-XX:+IgnoreUnrecognizedVMOptions");
         userArgs.add("-XX:+UnlockExperimentalVMOptions");
         userArgs.add("-XX:+UnlockDiagnosticVMOptions");
         userArgs.add("-XX:+AlwaysPreTouch");
@@ -502,7 +503,6 @@ public final class JREUtils {
         userArgs.add("-XX:+UseCompressedOops");
         userArgs.add("-XX:+UseCompressedClassPointers");
         userArgs.add("-XX:+OptimizeStringConcat");
-        userArgs.add("-XX:+UseSIMDForMemoryOps");
         userArgs.add("-XX:+UseFMA");
         userArgs.add("-XX:MaxInlineLevel=15");
         userArgs.add("-XX:InlineSmallCode=2500");

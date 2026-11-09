@@ -213,6 +213,10 @@ public class MainActivity extends BaseActivity implements
      * so the high-rate mode survives system window updates.
      */
     private void applyMaxRefreshRate() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getWindow().getDecorView().setImportantForAutofill(
+                    View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
         android.view.Display display = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
                 ? getDisplay()

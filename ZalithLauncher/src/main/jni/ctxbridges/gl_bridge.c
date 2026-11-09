@@ -62,7 +62,6 @@ gl_render_window_t* gl_init_context(gl_render_window_t *share) {
                     EGL_GREEN_SIZE, 8,
                     EGL_RED_SIZE, 8,
                     EGL_ALPHA_SIZE, 0,
-                    EGL_MIN_SWAP_INTERVAL, 0,
                     EGL_DEPTH_SIZE, 24,
                     EGL_SURFACE_TYPE,
                     EGL_WINDOW_BIT|EGL_PBUFFER_BIT,

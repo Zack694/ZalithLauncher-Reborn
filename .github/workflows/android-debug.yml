@@ -41,10 +41,24 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build JRE JAR files
-        run: ./gradlew jre_lwjgl3glfw:build --no-daemon
+        run: |
+          # Retry: transient 504s from GitHub-hosted artifacts (plugins.gradle.org
+          # redirects kotlin-compiler-embeddable to JetBrains' GitHub releases)
+          for i in 1 2 3; do
+            if ./gradlew jre_lwjgl3glfw:build --no-daemon; then exit 0; fi
+            echo "::warning::gradlew attempt $i failed (transient network/CDN 504) — retrying in 60s"
+            sleep 60
+          done
+          echo "All 3 gradle attempts failed"; exit 1
 
       - name: Build debug APK (arm64)
-        run: ./gradlew ZalithLauncher:assembleDebug -Darch=arm64 --no-daemon --stacktrace
+        run: |
+          for i in 1 2 3; do
+            if ./gradlew ZalithLauncher:assembleDebug -Darch=arm64 --no-daemon --stacktrace; then exit 0; fi
+            echo "::warning::gradlew attempt $i failed (transient network/CDN 504) — retrying in 60s"
+            sleep 60
+          done
+          echo "All 3 gradle attempts failed"; exit 1
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

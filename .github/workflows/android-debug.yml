@@ -28,14 +28,57 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Point gradle wrapper at Tencent mirror
+        # GitHub's release CDN has been returning 504 to Actions runners for
+        # github.com/*/releases/download/* — fetch the gradle distribution from
+        # the Tencent mirror instead (same file, verified by wrapper sha256 if set)
+        run: |
+          VER=$(grep -oP 'gradle-\d+(\.\d+)*-bin\.zip' gradle/wrapper/gradle-wrapper.properties | head -1)
+          sed -i "s#^distributionUrl=.*#distributionUrl=https\\://mirrors.cloud.tencent.com/gradle/$VER#" gradle/wrapper/gradle-wrapper.properties
+          grep distributionUrl gradle/wrapper/gradle-wrapper.properties
+
+      - name: Install gradle init script (Aliyun repos first)
+        # plugins.gradle.org redirects kotlin-compiler-embeddable to JetBrains'
+        # GitHub releases, which 504s during the outage. Gradle aborts on 5xx
+        # instead of falling through, so the Aliyun mirror (which serves the
+        # artifact directly) must be FIRST in the repository list.
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/ci-mirror.gradle <<'EOF'
+          gradle.settingsEvaluated { s ->
+              def drm = s.dependencyResolutionManagement
+              def aliyun = drm.repositories.maven { name 'ciAliyunPublic'; url 'https://maven.aliyun.com/repository/public' }
+              drm.repositories.remove(aliyun)
+              drm.repositories.addFirst(aliyun)
+              def pm = s.pluginManagement
+              def aliyunPlugin = pm.repositories.maven { name 'ciAliyunPlugin'; url 'https://maven.aliyun.com/repository/gradle-plugin' }
+              pm.repositories.remove(aliyunPlugin)
+              pm.repositories.addFirst(aliyunPlugin)
+          }
+          EOF
+
       - name: Make gradlew executable
         run: chmod +x gradlew
 
       - name: Build JRE JAR files
-        run: ./gradlew jre_lwjgl3glfw:build --no-daemon
+        run: |
+          # Retry: transient 504s from GitHub-hosted artifacts (plugins.gradle.org
+          # redirects kotlin-compiler-embeddable to JetBrains' GitHub releases)
+          for i in 1 2 3; do
+            if ./gradlew jre_lwjgl3glfw:build --no-daemon; then exit 0; fi
+            echo "::warning::gradlew attempt $i failed (transient network/CDN 504) — retrying in 60s"
+            sleep 60
+          done
+          echo "All 3 gradle attempts failed"; exit 1
 
       - name: Build debug APK (arm64)
-        run: ./gradlew ZalithLauncher:assembleDebug -Darch=arm64 --no-daemon --stacktrace
+        run: |
+          for i in 1 2 3; do
+            if ./gradlew ZalithLauncher:assembleDebug -Darch=arm64 --no-daemon --stacktrace; then exit 0; fi
+            echo "::warning::gradlew attempt $i failed (transient network/CDN 504) — retrying in 60s"
+            sleep 60
+          done
+          echo "All 3 gradle attempts failed"; exit 1
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

@@ -33,17 +33,53 @@ jobs:
           # Same movtery-key.jks the launcher release builds sign with
           echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 --decode > $GITHUB_WORKSPACE/release.jks
 
+      - name: Point gradle wrapper at Tencent mirror
+        # GitHub's release CDN has been returning 504 to Actions runners for
+        # github.com/*/releases/download/* — fetch the gradle distribution from
+        # the Tencent mirror instead
+        run: |
+          VER=$(grep -oP 'gradle-\d+(\.\d+)*-bin\.zip' ModInj/gradle/wrapper/gradle-wrapper.properties | head -1)
+          sed -i "s#^distributionUrl=.*#distributionUrl=https\\://mirrors.cloud.tencent.com/gradle/$VER#" ModInj/gradle/wrapper/gradle-wrapper.properties
+          grep distributionUrl ModInj/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Install gradle init script (Aliyun repos first)
+        # Maven Central / plugins.gradle.org redirect kotlin-compiler-embeddable
+        # to JetBrains' GitHub releases, which 504s during the outage. Gradle
+        # aborts on 5xx instead of falling through, so the Aliyun mirror (which
+        # serves the artifact directly) must be FIRST in the repository list.
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/ci-mirror.gradle <<'EOF'
+          gradle.settingsEvaluated { s ->
+              def drm = s.dependencyResolutionManagement
+              def aliyun = drm.repositories.maven { name 'ciAliyunPublic'; url 'https://maven.aliyun.com/repository/public' }
+              drm.repositories.remove(aliyun)
+              drm.repositories.addFirst(aliyun)
+              def pm = s.pluginManagement
+              def aliyunPlugin = pm.repositories.maven { name 'ciAliyunPlugin'; url 'https://maven.aliyun.com/repository/gradle-plugin' }
+              pm.repositories.remove(aliyunPlugin)
+              pm.repositories.addFirst(aliyunPlugin)
+          }
+          EOF
+
       - name: Build ModInj Release
         env:
           MOVTERY_KEYSTORE_PASSWORD: ${{ secrets.MOVTERY_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.RELEASE_ALIAS }}
         run: |
           chmod +x ModInj/gradlew
-          ModInj/gradlew -p ModInj assembleRelease --no-daemon \
-            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/release.jks \
-            -Pandroid.injected.signing.store.password=$MOVTERY_KEYSTORE_PASSWORD \
-            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$MOVTERY_KEYSTORE_PASSWORD
+          # Retry: the gradle wrapper download occasionally dies with
+          # HTTP 504 from the GitHub release CDN (transient infra flake)
+          for i in 1 2 3; do
+            if ModInj/gradlew -p ModInj assembleRelease --no-daemon \
+              -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/release.jks \
+              -Pandroid.injected.signing.store.password=$MOVTERY_KEYSTORE_PASSWORD \
+              -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+              -Pandroid.injected.signing.key.password=$MOVTERY_KEYSTORE_PASSWORD; then exit 0; fi
+            echo "::warning::gradlew attempt $i failed (transient network/CDN 504) — retrying in 60s"
+            sleep 60
+          done
+          echo "All 3 gradle attempts failed"; exit 1
 
       - name: Upload ModInj Release
         continue-on-error: true

@@ -64,8 +64,10 @@ public class ControlData {
     public boolean isFlickButton = false;
     public int flickDirection = 0; // 0:Right 1:Left 2:Up 3:Down 4:Up-Right 5:Up-Left 6:Down-Right 7:Down-Left
     public float flickDegrees = 65.0f;
-    public int flickReturnDelayMs = 35;
-    public boolean flickAutoAttack = false;
+    public int flickReturnDelayMs = 52; // >= 50ms (one MC tick) so the server sees the displaced yaw
+    public int flickHumanizeSteps = 4; // S-curve wrist interpolation steps (1 = instant, 4 = fast humanized)
+    public float flickSensitivityScale = 1.0f; // calibration multiplier on top of options.txt mouseSensitivity
+    public boolean flickAutoAttack = true;
     public String name;
     public int[] keycodes;      // CHANGED: Should store up to 6 keys now
     public float opacity;       //Alpha value from 0 to 1;
@@ -178,6 +180,8 @@ public class ControlData {
         this.flickDirection = controlData.flickDirection;
         this.flickDegrees = controlData.flickDegrees;
         this.flickReturnDelayMs = controlData.flickReturnDelayMs;
+        this.flickHumanizeSteps = controlData.flickHumanizeSteps;
+        this.flickSensitivityScale = controlData.flickSensitivityScale;
         this.flickAutoAttack = controlData.flickAutoAttack;
     }
 

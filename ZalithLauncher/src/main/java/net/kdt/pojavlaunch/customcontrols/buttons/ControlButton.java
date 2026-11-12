@@ -165,13 +165,19 @@ public class ControlButton extends TextView implements ControlInterface {
                     requestUnbufferedDispatch(event);
                 } catch (Throwable ignored) {
                 }
-                executeKbDisplacementFlick();
+                if(getProperties().isFlickButton){
+                    // Flick buttons consume the press: the humanized flick plus the
+                    // single snap-back attack IS the whole action, so no early click
+                    // is fired and the 1.21 attack cooldown is never drained.
+                    executeKbDisplacementFlick();
+                    break;
+                }
                 if(!getProperties().isToggle){
                     sendKeyPresses(true);
                 }
                 break;
             case MotionEvent.ACTION_POINTER_DOWN: // 5
-                if(!getProperties().isToggle){
+                if(!getProperties().isFlickButton && !getProperties().isToggle){
                     sendKeyPresses(true);
                 }
                 break;
@@ -186,7 +192,7 @@ public class ControlButton extends TextView implements ControlInterface {
                 if(mIsPointerOutOfBounds) getControlLayoutParent().onTouch(this, event);
                 mIsPointerOutOfBounds = false;
 
-                if(!triggerToggle()) {
+                if(!getProperties().isFlickButton && !triggerToggle()) {
                     sendKeyPresses(false);
                 }
                 break;
@@ -308,6 +314,9 @@ public class ControlButton extends TextView implements ControlInterface {
     }
 
     private long mLastEditTapMs = 0L;
+    private boolean mFlickInProgress = false;
+    private float mAppliedFlickDx = 0f;
+    private float mAppliedFlickDy = 0f;
 
     /**
      * Edit Controls mode: a quick double-tap on a button opens the
@@ -328,16 +337,18 @@ public class ControlButton extends TextView implements ControlInterface {
         return ControlInterface.super.onLongClick(v);
     }
 
-    /** Per-button configuration popup for the KB Displacement Camera Flick. */
+    /** Per-button configuration popup for the Humanized KB Displacement Camera Flick. */
     private void showKbFlickEditorDialog() {
         android.content.Context ctx = getContext();
+        android.widget.ScrollView scroll = new android.widget.ScrollView(ctx);
         android.widget.LinearLayout layout = new android.widget.LinearLayout(ctx);
         layout.setOrientation(android.widget.LinearLayout.VERTICAL);
-        int pad = (int) (16 * ctx.getResources().getDisplayMetrics().density);
+        int pad = (int) (14 * ctx.getResources().getDisplayMetrics().density);
         layout.setPadding(pad, pad, pad, pad);
+        scroll.addView(layout);
 
         final android.widget.CheckBox enableBox = new android.widget.CheckBox(ctx);
-        enableBox.setText("Enable KB Displacement Camera Flick");
+        enableBox.setText("Enable Humanized KB Displacement Camera Flick");
         enableBox.setChecked(mProperties.isFlickButton);
         layout.addView(enableBox);
 
@@ -358,7 +369,7 @@ public class ControlButton extends TextView implements ControlInterface {
         layout.addView(dirSpinner);
 
         final android.widget.TextView degLabel = new android.widget.TextView(ctx);
-        degLabel.setText("Flick Angle in Degrees (e.g. 45, 65, 80, 90, 180):");
+        degLabel.setText("Flick Angle in Degrees (auto-calibrated to options.txt sensitivity):");
         layout.addView(degLabel);
 
         final android.widget.EditText degInput = new android.widget.EditText(ctx);
@@ -366,23 +377,41 @@ public class ControlButton extends TextView implements ControlInterface {
         degInput.setText(String.valueOf(mProperties.flickDegrees));
         layout.addView(degInput);
 
+        final android.widget.TextView stepsLabel = new android.widget.TextView(ctx);
+        stepsLabel.setText("Humanize Smoothness Steps (1 = Instant, 4 = Fast Human Wrist, 6 = Smooth):");
+        layout.addView(stepsLabel);
+
+        final android.widget.EditText stepsInput = new android.widget.EditText(ctx);
+        stepsInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        stepsInput.setText(String.valueOf(mProperties.flickHumanizeSteps <= 0 ? 4 : mProperties.flickHumanizeSteps));
+        layout.addView(stepsInput);
+
         final android.widget.TextView delayLabel = new android.widget.TextView(ctx);
-        delayLabel.setText("Snap-Back Delay in ms (35ms = 1 tick for KB Displacement):");
+        delayLabel.setText("Tick Hold Time in ms (52ms guarantees one full 50ms MC tick registers the displaced yaw):");
         layout.addView(delayLabel);
 
         final android.widget.EditText delayInput = new android.widget.EditText(ctx);
         delayInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        delayInput.setText(String.valueOf(mProperties.flickReturnDelayMs));
+        delayInput.setText(String.valueOf(mProperties.flickReturnDelayMs < 40 ? 52 : mProperties.flickReturnDelayMs));
         layout.addView(delayInput);
 
+        final android.widget.TextView scaleLabel = new android.widget.TextView(ctx);
+        scaleLabel.setText("Angle Calibration Multiplier (1.0 = Exact Vanilla Sensitivity):");
+        layout.addView(scaleLabel);
+
+        final android.widget.EditText scaleInput = new android.widget.EditText(ctx);
+        scaleInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        scaleInput.setText(String.valueOf(mProperties.flickSensitivityScale <= 0f ? 1.0f : mProperties.flickSensitivityScale));
+        layout.addView(scaleInput);
+
         final android.widget.CheckBox autoAttackBox = new android.widget.CheckBox(ctx);
-        autoAttackBox.setText("Auto Left-Click (Attack) on Snap-Back");
+        autoAttackBox.setText("Single Attack on Snap-Back (fires 1 clean hit after the crosshair returns)");
         autoAttackBox.setChecked(mProperties.flickAutoAttack);
         layout.addView(autoAttackBox);
 
         new android.app.AlertDialog.Builder(ctx)
-            .setTitle("KB Displacement / Camera Flick Settings")
-            .setView(layout)
+            .setTitle("Humanized KB Displacement Flick")
+            .setView(scroll)
             .setPositiveButton("Save", (d, w) -> {
                 mProperties.isFlickButton = enableBox.isChecked();
                 mProperties.flickDirection = dirSpinner.getSelectedItemPosition();
@@ -390,7 +419,13 @@ public class ControlButton extends TextView implements ControlInterface {
                     mProperties.flickDegrees = Float.parseFloat(degInput.getText().toString().trim());
                 } catch (Throwable ignored) {}
                 try {
-                    mProperties.flickReturnDelayMs = Integer.parseInt(delayInput.getText().toString().trim());
+                    mProperties.flickHumanizeSteps = Math.max(1, Math.min(12, Integer.parseInt(stepsInput.getText().toString().trim())));
+                } catch (Throwable ignored) {}
+                try {
+                    mProperties.flickReturnDelayMs = Math.max(20, Math.min(250, Integer.parseInt(delayInput.getText().toString().trim())));
+                } catch (Throwable ignored) {}
+                try {
+                    mProperties.flickSensitivityScale = Math.max(0.1f, Math.min(5.0f, Float.parseFloat(scaleInput.getText().toString().trim())));
                 } catch (Throwable ignored) {}
                 mProperties.flickAutoAttack = autoAttackBox.isChecked();
             })
@@ -398,15 +433,40 @@ public class ControlButton extends TextView implements ControlInterface {
             .show();
     }
 
+    /** Single clean attack on snap-back: presses this button's own keycodes once. */
+    private void triggerSingleFlickAttack(boolean pressed) {
+        sendKeyPresses(pressed);
+    }
+
     /**
-     * Visibly flicks the real camera via CallbackBridge cursor displacement and
-     * snaps back to the exact original pixel after flickReturnDelayMs.
-     * ~4.4444 cursor units per degree of yaw at default MC sensitivity.
+     * Humanized KB displacement camera flick:
+     *  Phase 1 - S-curve outbound whip (sine ease-out + tiny random jitter),
+     *  Phase 2 - hold the displaced yaw for one full 50ms MC tick,
+     *  Phase 3 - S-curve return to the exact starting pixel (zero net drift),
+     *  Phase 4 - one render frame later, fire a SINGLE attack via the
+     *            button's own keycodes so the 1.21 cooldown is never wasted.
+     * Cursor units per degree are auto-calibrated from options.txt mouseSensitivity:
+     * d = sens * 0.6 + 0.2; mult = d^3 * 8; degrees = delta * mult * 0.15.
      */
     private void executeKbDisplacementFlick() {
-        if (mProperties == null || !mProperties.isFlickButton || !CallbackBridge.isGrabbing()) return;
-        float pixelsPerDegree = 4.444444f;
+        if (mFlickInProgress || mProperties == null || !mProperties.isFlickButton || !CallbackBridge.isGrabbing()) return;
+        mFlickInProgress = true;
+        mAppliedFlickDx = 0f;
+        mAppliedFlickDy = 0f;
+
+        double sens = 0.5;
+        try {
+            String sVal = com.movtery.zalithlauncher.feature.MCOptions.INSTANCE.get("mouseSensitivity");
+            if (sVal != null && !sVal.isEmpty()) {
+                sens = Double.parseDouble(sVal.trim());
+            }
+        } catch (Throwable ignored) {}
+        double d = sens * 0.6 + 0.2;
+        double mcSensMult = (d * d * d) * 8.0;
+        float scale = (mProperties.flickSensitivityScale > 0.05f) ? mProperties.flickSensitivityScale : 1.0f;
+        float pixelsPerDegree = (float) (1.0 / (0.15 * Math.max(0.05, mcSensMult))) * scale;
         float mag = mProperties.flickDegrees * pixelsPerDegree;
+
         float dx = 0f;
         float dy = 0f;
         float diag = 0.70710678f;
@@ -420,24 +480,84 @@ public class ControlButton extends TextView implements ControlInterface {
             case 6: dx =  mag * diag; dy =  mag * diag; break; // Down-Right
             case 7: dx = -mag * diag; dy =  mag * diag; break; // Down-Left
         }
-        final float finalDx = dx;
-        final float finalDy = dy;
+        final float totalDx = dx;
+        final float totalDy = dy;
+        final int steps = Math.max(1, Math.min(12, mProperties.flickHumanizeSteps <= 0 ? 4 : mProperties.flickHumanizeSteps));
+        final long stepIntervalMs = 4L; // 240Hz frame pacing
 
-        // Step 1: visibly flick the real camera to the displaced angle
-        CallbackBridge.mouseX += finalDx;
-        CallbackBridge.mouseY += finalDy;
-        CallbackBridge.sendCursorPos(CallbackBridge.mouseX, CallbackBridge.mouseY);
+        // Phase 1: humanized S-curve outbound whip with zero-sum micro-jitter
+        for (int i = 1; i <= steps; i++) {
+            final int stepIdx = i;
+            postDelayed(() -> {
+                float targetX;
+                float targetY;
+                if (stepIdx == steps) {
+                    targetX = totalDx;
+                    targetY = totalDy;
+                } else {
+                    double t = stepIdx / (double) steps;
+                    // Sine ease-out wrist acceleration curve + tiny natural human variance
+                    float curve = (float) Math.sin(t * (Math.PI * 0.5));
+                    float jitter = (java.util.concurrent.ThreadLocalRandom.current().nextFloat() - 0.5f) * 0.036f;
+                    float frac = Math.max(0.05f, Math.min(0.98f, curve + jitter));
+                    targetX = totalDx * frac;
+                    targetY = totalDy * frac;
+                }
+                float stepDx = targetX - mAppliedFlickDx;
+                float stepDy = targetY - mAppliedFlickDy;
+                mAppliedFlickDx += stepDx;
+                mAppliedFlickDy += stepDy;
+                CallbackBridge.mouseX += stepDx;
+                CallbackBridge.mouseY += stepDy;
+                CallbackBridge.sendCursorPos(CallbackBridge.mouseX, CallbackBridge.mouseY);
+            }, (stepIdx - 1) * stepIntervalMs);
+        }
 
-        // Step 2: snap back to the exact original angle after the delay
-        int delayMs = Math.max(1, Math.min(250, mProperties.flickReturnDelayMs));
+        // Phase 2: hold the displaced angle across one full 50ms MC client tick
+        long outboundDurationMs = (steps - 1) * stepIntervalMs;
+        int holdMs = Math.max(25, Math.min(250, mProperties.flickReturnDelayMs <= 0 ? 52 : mProperties.flickReturnDelayMs));
+        long returnStartMs = outboundDurationMs + holdMs;
+
+        // Phase 3: humanized S-curve return to the exact starting pixel (0.0 net drift)
+        for (int j = 1; j <= steps; j++) {
+            final int retIdx = j;
+            postDelayed(() -> {
+                float remX;
+                float remY;
+                if (retIdx == steps) {
+                    remX = 0f;
+                    remY = 0f;
+                } else {
+                    double t = retIdx / (double) steps;
+                    float curve = (float) (1.0 - Math.sin(t * (Math.PI * 0.5)));
+                    float jitter = (java.util.concurrent.ThreadLocalRandom.current().nextFloat() - 0.5f) * 0.036f;
+                    float frac = Math.max(0.02f, Math.min(0.95f, curve + jitter));
+                    remX = totalDx * frac;
+                    remY = totalDy * frac;
+                }
+                float stepDx = remX - mAppliedFlickDx;
+                float stepDy = remY - mAppliedFlickDy;
+                mAppliedFlickDx += stepDx;
+                mAppliedFlickDy += stepDy;
+                CallbackBridge.mouseX += stepDx;
+                CallbackBridge.mouseY += stepDy;
+                CallbackBridge.sendCursorPos(CallbackBridge.mouseX, CallbackBridge.mouseY);
+            }, returnStartMs + (retIdx * stepIntervalMs));
+        }
+
+        // Phase 4: one render frame after the return so Mouse.updateMouse() locks the
+        // crosshair back on target, then fire ONE single attack (no double click).
+        long returnDoneMs = returnStartMs + (steps * stepIntervalMs);
         postDelayed(() -> {
-            CallbackBridge.mouseX -= finalDx;
-            CallbackBridge.mouseY -= finalDy;
-            CallbackBridge.sendCursorPos(CallbackBridge.mouseX, CallbackBridge.mouseY);
             if (mProperties.flickAutoAttack) {
-                sendMouseButton(LwjglGlfwKeycode.GLFW_MOUSE_BUTTON_LEFT, true);
-                postDelayed(() -> sendMouseButton(LwjglGlfwKeycode.GLFW_MOUSE_BUTTON_LEFT, false), 20);
+                triggerSingleFlickAttack(true);
+                postDelayed(() -> {
+                    triggerSingleFlickAttack(false);
+                    mFlickInProgress = false;
+                }, 22L);
+            } else {
+                mFlickInProgress = false;
             }
-        }, delayMs);
+        }, returnDoneMs + 10L);
     }
 }

@@ -60,6 +60,12 @@ public class ControlData {
      */
     public String dynamicX, dynamicY;
     public boolean isToggle, passThruEnabled;
+    // --- 8-Way KB Displacement Camera Flick properties (persisted in the control JSON) ---
+    public boolean isFlickButton = false;
+    public int flickDirection = 0; // 0:Right 1:Left 2:Up 3:Down 4:Up-Right 5:Up-Left 6:Down-Right 7:Down-Left
+    public float flickDegrees = 65.0f;
+    public int flickReturnDelayMs = 35;
+    public boolean flickAutoAttack = false;
     public String name;
     public int[] keycodes;      // CHANGED: Should store up to 6 keys now
     public float opacity;       //Alpha value from 0 to 1;
@@ -168,6 +174,11 @@ public class ControlData {
         this.minCps = controlData.minCps;
         this.maxCps = controlData.maxCps;
         this.isVoicechatMic = controlData.isVoicechatMic;
+        this.isFlickButton = controlData.isFlickButton;
+        this.flickDirection = controlData.flickDirection;
+        this.flickDegrees = controlData.flickDegrees;
+        this.flickReturnDelayMs = controlData.flickReturnDelayMs;
+        this.flickAutoAttack = controlData.flickAutoAttack;
     }
 
     public static ControlData[] getSpecialButtons(Context context) {

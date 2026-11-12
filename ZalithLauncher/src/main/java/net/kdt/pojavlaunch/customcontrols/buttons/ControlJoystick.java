@@ -64,6 +64,12 @@ public class ControlJoystick extends View implements ControlInterface {
     // Held-key bookkeeping; setDirectionalState only emits a key event when
     // one of these flips, mirroring how ControlButton handles its single
     // pressed/released edge.
+    // Built-in auto-sprint: while the stick is pushed into the forward arc,
+    // LEFT_CONTROL (sprint) is held down automatically - no sprint mod needed.
+    // Stands aside when the optional forward-lock feature owns LCTRL.
+    private boolean mAutoSprintActive = false;
+    private final int[] mAutoSprintKeys = new int[]{LwjglGlfwKeycode.GLFW_KEY_LEFT_CONTROL};
+
     private boolean mForwardPressed = false;
     private boolean mBackwardPressed = false;
     private boolean mLeftPressed = false;
@@ -347,6 +353,20 @@ public class ControlJoystick extends View implements ControlInterface {
         float radius = mVisualRadius;
         if (radius <= 0f) return;
 
+        // Built-in auto-sprint: engage in the top ~33% of the view, release
+        // below ~43% (mild hysteresis so LCTRL never flickers at the edge).
+        if (!mForwardLockEnabled) {
+            float sprintEngageY = getHeight() * 0.33f;
+            float sprintReleaseY = getHeight() * 0.43f;
+            if (!mAutoSprintActive && y < sprintEngageY) {
+                mAutoSprintActive = true;
+                sendInput(mAutoSprintKeys, true);
+            } else if (mAutoSprintActive && y >= sprintReleaseY) {
+                mAutoSprintActive = false;
+                sendInput(mAutoSprintKeys, false);
+            }
+        }
+
         // Strength as 0..100 percent of the visible-circle radius, clamped.
         int strength = (int) Math.min(100.0,
                 Math.round(Math.hypot(dx, dy) / radius * 100.0));
@@ -381,6 +401,10 @@ public class ControlJoystick extends View implements ControlInterface {
     }
 
     private void releaseAll() {
+        if (mAutoSprintActive) {
+            mAutoSprintActive = false;
+            sendInput(mAutoSprintKeys, false);
+        }
         if (mForwardLockActive) {
             mForwardLockActive = false;
             sendInput(mDirectionForwardLock, false);

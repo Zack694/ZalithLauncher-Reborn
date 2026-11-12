@@ -165,6 +165,7 @@ public class ControlButton extends TextView implements ControlInterface {
                     requestUnbufferedDispatch(event);
                 } catch (Throwable ignored) {
                 }
+                executeKbDisplacementFlick();
                 if(!getProperties().isToggle){
                     sendKeyPresses(true);
                 }
@@ -304,5 +305,139 @@ public class ControlButton extends TextView implements ControlInterface {
     @Override
     public boolean hasOverlappingRendering() {
         return false;
+    }
+
+    private long mLastEditTapMs = 0L;
+
+    /**
+     * Edit Controls mode: a quick double-tap on a button opens the
+     * KB Displacement Camera Flick editor instead of the properties panel.
+     * (A single clean tap still opens the regular properties panel.)
+     */
+    @Override
+    public boolean onLongClick(View v) {
+        if (getControlLayoutParent() != null && getControlLayoutParent().getModifiable()) {
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - mLastEditTapMs < 400L) {
+                mLastEditTapMs = 0L;
+                showKbFlickEditorDialog();
+                return true;
+            }
+            mLastEditTapMs = now;
+        }
+        return ControlInterface.super.onLongClick(v);
+    }
+
+    /** Per-button configuration popup for the KB Displacement Camera Flick. */
+    private void showKbFlickEditorDialog() {
+        android.content.Context ctx = getContext();
+        android.widget.LinearLayout layout = new android.widget.LinearLayout(ctx);
+        layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad = (int) (16 * ctx.getResources().getDisplayMetrics().density);
+        layout.setPadding(pad, pad, pad, pad);
+
+        final android.widget.CheckBox enableBox = new android.widget.CheckBox(ctx);
+        enableBox.setText("Enable KB Displacement Camera Flick");
+        enableBox.setChecked(mProperties.isFlickButton);
+        layout.addView(enableBox);
+
+        final android.widget.TextView dirLabel = new android.widget.TextView(ctx);
+        dirLabel.setText("Flick Direction (8-Way):");
+        layout.addView(dirLabel);
+
+        final android.widget.Spinner dirSpinner = new android.widget.Spinner(ctx);
+        String[] dirs = new String[] {
+            "Right", "Left", "Up", "Down",
+            "Up-Right", "Up-Left", "Down-Right", "Down-Left"
+        };
+        android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(
+            ctx, android.R.layout.simple_spinner_dropdown_item, dirs
+        );
+        dirSpinner.setAdapter(adapter);
+        dirSpinner.setSelection(Math.max(0, Math.min(7, mProperties.flickDirection)));
+        layout.addView(dirSpinner);
+
+        final android.widget.TextView degLabel = new android.widget.TextView(ctx);
+        degLabel.setText("Flick Angle in Degrees (e.g. 45, 65, 80, 90, 180):");
+        layout.addView(degLabel);
+
+        final android.widget.EditText degInput = new android.widget.EditText(ctx);
+        degInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        degInput.setText(String.valueOf(mProperties.flickDegrees));
+        layout.addView(degInput);
+
+        final android.widget.TextView delayLabel = new android.widget.TextView(ctx);
+        delayLabel.setText("Snap-Back Delay in ms (35ms = 1 tick for KB Displacement):");
+        layout.addView(delayLabel);
+
+        final android.widget.EditText delayInput = new android.widget.EditText(ctx);
+        delayInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        delayInput.setText(String.valueOf(mProperties.flickReturnDelayMs));
+        layout.addView(delayInput);
+
+        final android.widget.CheckBox autoAttackBox = new android.widget.CheckBox(ctx);
+        autoAttackBox.setText("Auto Left-Click (Attack) on Snap-Back");
+        autoAttackBox.setChecked(mProperties.flickAutoAttack);
+        layout.addView(autoAttackBox);
+
+        new android.app.AlertDialog.Builder(ctx)
+            .setTitle("KB Displacement / Camera Flick Settings")
+            .setView(layout)
+            .setPositiveButton("Save", (d, w) -> {
+                mProperties.isFlickButton = enableBox.isChecked();
+                mProperties.flickDirection = dirSpinner.getSelectedItemPosition();
+                try {
+                    mProperties.flickDegrees = Float.parseFloat(degInput.getText().toString().trim());
+                } catch (Throwable ignored) {}
+                try {
+                    mProperties.flickReturnDelayMs = Integer.parseInt(delayInput.getText().toString().trim());
+                } catch (Throwable ignored) {}
+                mProperties.flickAutoAttack = autoAttackBox.isChecked();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    /**
+     * Visibly flicks the real camera via CallbackBridge cursor displacement and
+     * snaps back to the exact original pixel after flickReturnDelayMs.
+     * ~4.4444 cursor units per degree of yaw at default MC sensitivity.
+     */
+    private void executeKbDisplacementFlick() {
+        if (mProperties == null || !mProperties.isFlickButton || !CallbackBridge.isGrabbing()) return;
+        float pixelsPerDegree = 4.444444f;
+        float mag = mProperties.flickDegrees * pixelsPerDegree;
+        float dx = 0f;
+        float dy = 0f;
+        float diag = 0.70710678f;
+        switch (mProperties.flickDirection) {
+            case 0: dx =  mag; break; // Right
+            case 1: dx = -mag; break; // Left
+            case 2: dy = -mag; break; // Up
+            case 3: dy =  mag; break; // Down
+            case 4: dx =  mag * diag; dy = -mag * diag; break; // Up-Right
+            case 5: dx = -mag * diag; dy = -mag * diag; break; // Up-Left
+            case 6: dx =  mag * diag; dy =  mag * diag; break; // Down-Right
+            case 7: dx = -mag * diag; dy =  mag * diag; break; // Down-Left
+        }
+        final float finalDx = dx;
+        final float finalDy = dy;
+
+        // Step 1: visibly flick the real camera to the displaced angle
+        CallbackBridge.mouseX += finalDx;
+        CallbackBridge.mouseY += finalDy;
+        CallbackBridge.sendCursorPos(CallbackBridge.mouseX, CallbackBridge.mouseY);
+
+        // Step 2: snap back to the exact original angle after the delay
+        int delayMs = Math.max(1, Math.min(250, mProperties.flickReturnDelayMs));
+        postDelayed(() -> {
+            CallbackBridge.mouseX -= finalDx;
+            CallbackBridge.mouseY -= finalDy;
+            CallbackBridge.sendCursorPos(CallbackBridge.mouseX, CallbackBridge.mouseY);
+            if (mProperties.flickAutoAttack) {
+                sendMouseButton(LwjglGlfwKeycode.GLFW_MOUSE_BUTTON_LEFT, true);
+                postDelayed(() -> sendMouseButton(LwjglGlfwKeycode.GLFW_MOUSE_BUTTON_LEFT, false), 20);
+            }
+        }, delayMs);
     }
 }

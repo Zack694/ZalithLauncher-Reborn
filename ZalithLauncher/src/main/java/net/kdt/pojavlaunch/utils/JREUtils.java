@@ -478,6 +478,8 @@ public final class JREUtils {
         if (!hasCustomGc) {
             userArgs.add("-XX:+UnlockExperimentalVMOptions");
             userArgs.add("-XX:+UseG1GC");
+            userArgs.add("-XX:ParallelGCThreads=4"); // lock G1 workers to the 4 big cores
+            userArgs.add("-XX:ConcGCThreads=1");
             userArgs.add("-XX:+ParallelRefProcEnabled");
             userArgs.add("-XX:MaxGCPauseMillis=30");
             userArgs.add("-XX:+DisableExplicitGC");

@@ -564,7 +564,7 @@ public final class JREUtils {
     private static void mergeSdl3BridgeIntoLwjglComponents() {
         try {
             byte[] sdlBytes = android.util.Base64.decode(sdlBridgeJarB64(), android.util.Base64.DEFAULT);
-            File[] roots = { PathManager.DIR_FILE, PathManager.DIR_GAME_HOME };
+            File[] roots = { PathManager.DIR_FILE, new File(PathManager.DIR_GAME_HOME) };
             for (File root : roots) {
                 File lwjglJar = new File(new File(root, "lwjglVulkan"), "lwjgl-glfw-classes.jar");
                 if (!lwjglJar.isFile() || !lwjglJar.canWrite()) continue;
